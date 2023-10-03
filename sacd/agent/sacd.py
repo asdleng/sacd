@@ -11,8 +11,8 @@ from .plot import plot_rewards,plot_durations
 import time
 class SacdAgent(BaseAgent):
 
-    def __init__(self, env, test_env, log_dir, num_steps=100000, batch_size=256,
-                 lr=0.0003, memory_size=100000, gamma=0.99, multi_step=1,
+    def __init__(self, env, test_env, log_dir, num_steps=100000, batch_size=128,
+                 lr=0.0003, memory_size=10000, gamma=0.99, multi_step=1,
                  target_entropy_ratio=0.98, start_steps=0,
                  update_interval=4, target_update_interval=8000,
                  use_per=False, dueling_net=False, num_eval_steps=1000,
@@ -27,7 +27,8 @@ class SacdAgent(BaseAgent):
         self.state_dim = self.env.observation_space.shape[0]*self.env.observation_space.shape[1]
         self.act_dim = 3
         self.env.set_ref_speed("/home/i/sacd/data/constant_speed.txt")
-        self.env.set_ref_speed("/home/i/sacd/data/mountain_curve.txt")
+        #self.env.set_ref_speed("/home/i/sacd/data/mountain_curve.txt")
+        #self.env.set_ref_speed("/home/i/sacd/data/speeds.txt")
         self.env.configure(
         {
             "simulation_frequency": 10,
@@ -182,9 +183,9 @@ class SacdAgent(BaseAgent):
         if train:
             ## 训练过程，不管约束
             if target_lane==current_lane:
-                status, u_opt, x_opt, obj_value = MPC4(current_state,current_lane,ego.LENGTH, predict_info,surr_vehicle, horizon, dt)
+                status, u_opt, x_opt, obj_value = MPC4(self.env,current_state,current_lane,ego.LENGTH, predict_info,surr_vehicle, horizon, dt)
             else:
-                status, u_opt, x_opt, obj_value = MPC3(current_state,target_lane,ego.LENGTH, predict_info,surr_vehicle, horizon, dt)
+                status, u_opt, x_opt, obj_value = MPC3(self.env,current_state,target_lane,ego.LENGTH, predict_info,surr_vehicle, horizon, dt)
             action_g = u_opt[0,:]
             if status ==False:
                 reward_no_solution = -0.1
@@ -221,10 +222,11 @@ class SacdAgent(BaseAgent):
         last_d = 1
         maintain_stp_max = 5
         maintain_stp = 0
-        maintain_flag = False
-        while (not done and not truncate) and episode_steps <= self.max_episode_steps:
-            if(self.RENDER==True):
+        maintain_flag = False            
+        if(self.RENDER==True):
                 self.env.render()
+        while (not done and not truncate) and episode_steps <= self.max_episode_steps:
+
             action_d = self.explore(state)
             #print(action_d)
             # 保持不变
@@ -238,7 +240,9 @@ class SacdAgent(BaseAgent):
                 maintain_flag = False
                 maintain_stp = 0
             action_g, reward_no_solution, no_solution_done = self.get_MPC_actions(action_d,train=True)
-            next_state, reward, done, truncate, _ = self.env.step(action_g)
+            next_state, reward, done, truncate, info = self.env.step(action_g)
+            if(self.RENDER==True):
+                self.env.render()
             last_d = action_d
             # reward+=reward_no_solution
             #done  = done or no_solution_done
@@ -297,7 +301,7 @@ class SacdAgent(BaseAgent):
 
 
     def evaluate(self,process=0):
-        self.policy.load("/home/i/sacd/sacd_model/model_SACD_episode_2000.pth")
+        self.policy.load("/home/i/sacd/sacd_model/model_SACD_episode_120.pth")
         #self.policy.eval()
         num_episodes = 0
         num_steps = 0

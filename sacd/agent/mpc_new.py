@@ -212,7 +212,7 @@ def MPC2(current_state,lane_ind, L, obs, surr_vehicle, n, dt):
       return False, np.zeros((N, 2)), initial_states, np.inf
 '''不考虑碰撞，训练网络时用
 '''
-def MPC3(current_state,lane_ind, L, obs, surr_vehicle, n, dt):
+def MPC3(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     
     T = dt
     N = n
@@ -264,7 +264,7 @@ def MPC3(current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     # some addition parameters
     Q = np.array([[0.0, 0.0, 0.0,0.0], 
     [0.0, 5.0, 0.0,0.0], 
-    [0.0, 0.0, 1.0,0.0], 
+    [0.0, 0.0, 0.0,0.0], 
     [0.0, 0.0, 0.0, 0.0]])
     R = np.array([[1.0, 0.0], [0.0, 1.0]])
     # cost function
@@ -272,7 +272,8 @@ def MPC3(current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     for i in range(N):
         obj = obj + ca.mtimes([(opt_states[i, :]-opt_xs.T), Q, (opt_states[i, :]-opt_xs.T).T]
                               ) + ca.mtimes([opt_controls[i, :], R, opt_controls[i, :].T])
-
+    for i in range(N):
+            obj = obj + (v[i] - get_ref_spd(x[i],env))**2
     opti.minimize(obj)
 
     # boundrary and control conditions
@@ -304,9 +305,9 @@ def MPC3(current_state,lane_ind, L, obs, surr_vehicle, n, dt):
       return True, u_res, x_m, obj_value
     except RuntimeError:
       return False, np.zeros((N, 2)), initial_states, np.inf
+'''训练时用，保证直行，根车，
 '''
-'''
-def MPC4(current_state,lane_ind, L, obs, surr_vehicle, n, dt):
+def MPC4(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     
     T = dt
     N = n
@@ -358,7 +359,7 @@ def MPC4(current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     # some addition parameters
     Q = np.array([[0.0, 0.0, 0.0,0.0], 
     [0.0, 5.0, 0.0,0.0], 
-    [0.0, 0.0, 1.0,0.0], 
+    [0.0, 0.0, 0.0,0.0], 
     [0.0, 0.0, 0.0, 0.0]])
     R = np.array([[1.0, 0.0], [0.0, 1.0]])
     # cost function
@@ -366,7 +367,8 @@ def MPC4(current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     for i in range(N):
         obj = obj + ca.mtimes([(opt_states[i, :]-opt_xs.T), Q, (opt_states[i, :]-opt_xs.T).T]
                               ) + ca.mtimes([opt_controls[i, :], R, opt_controls[i, :].T])
-
+    for i in range(N):
+        obj = obj + (v[i] - get_ref_spd(x[i],env))**2
     opti.minimize(obj)
 
     # boundrary and control conditions
@@ -405,10 +407,10 @@ def get_ref_spd(x,env):
     return ref_spd(x)
 
 def main():
-    # 自定义的环境，与自带的racetrack环境相同，目前在学习如何自定义自己的环境
     env = gym.make("myenv",  render_mode='rgb_array')
-    #env.set_ref_speed("/home/i/sacd/data/constant_speed.txt")
-    env.set_ref_speed("/home/i/sacd/data/mountain_curve.txt")
+    env.set_ref_speed("/home/i/sacd/data/constant_speed.txt")
+    #env.set_ref_speed("/home/i/sacd/data/mountain_curve.txt")
+    #env.set_ref_speed("/home/i/sacd/data/speeds.txt")
     env.config["initial_lane_id"] = 1
     #env = NormalizedActions(env)
     env.configure(
