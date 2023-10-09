@@ -98,7 +98,7 @@ def MPC(env,current_state,lane_ind,L, obs,surr_vehicle, n, dt):
             if surr_vehicle[closest_vehicle_front_id][2]<ttc:
                 ttc = surr_vehicle[closest_vehicle_front_id][2]
         if surr_vehicle[closest_vehicle_front_id][3] <100:         
-            obj = obj+ 4000 / surr_vehicle[closest_vehicle_front_id][3]
+            obj = obj+ 8000 / surr_vehicle[closest_vehicle_front_id][3]
     obj = obj + 800 /  ttc
     for i in range(N):
         obj = obj + 0.01*(v[i] - get_ref_spd(x[i],env))**2
@@ -463,13 +463,16 @@ def main():
             "render_agent": False,
             "offscreen_rendering": False
         })
+    # 注意，这个才是关键的policy_frequency    
+    policy_frequency = 1
     crash_num = 0
     try_num = 10
     eposide_error_array = np.array([])
     start_time = time.time()
     num_steps = 0
+    total_return = 0
     for i in range(try_num):
-        eposide_reward = 0
+        eposide_return = 0
         eposide_error = 0
         env.reset()
         done, truncate = False, False
@@ -479,6 +482,7 @@ def main():
         target_lane = env.config["initial_lane_id"]
         no_solution_flag = False
         stp = 0
+        count = 0
         while not done and not truncate:
             stp+=1
             num_steps+=1
@@ -549,17 +553,22 @@ def main():
             #print("delta_x:",round(dx,2),round(dy,2),round(dv,2),round(dheading,2))
             #print("Acc:" ,action[0])
             #print("Speed:" ,info['speed'])
-            eposide_reward+=reward
+            if(count % round(env.config['policy_frequency']/policy_frequency) == 0):
+                eposide_return += reward
+            count+=1
             error = abs(info['speed']-env.get_ref_speed()[0])
             eposide_error+=error
             if done:
                 crash_num +=1
-        print("回合奖励为：",eposide_reward)
+        total_return+=eposide_return
+        print("回合奖励为：",eposide_return)
         print("回合误差为：",eposide_error/stp)
         eposide_error_array = np.append(eposide_error_array,eposide_error/stp)
+    end_time = time.time()
     print("碰撞",crash_num,"/",try_num,"次")
     print("平均误差为：",np.sqrt(np.mean(eposide_error_array**2)))
-    end_time = time.time()
+    print("平均奖励为：",total_return/try_num)
+    
     print("平均计算时间为：",(end_time-start_time)/num_steps)
     env.close()
 if __name__=="__main__":

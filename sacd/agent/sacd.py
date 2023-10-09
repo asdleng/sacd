@@ -492,7 +492,7 @@ class SacdAgent(BaseAgent):
         try_return_q.put(try_return_list)
 
     def evaluate(self, process=0, MPC_certi=True):
-        self.policy.load("/home/i/sacd/sacd_model/model_SACD_episode_6900.pth")
+        self.policy.load("/home/i/sacd/sacd_model/model_SACD_episode_10000.pth")
         self.policy.eval()
         num_episodes = 0
         num_steps = 0
