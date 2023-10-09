@@ -28,8 +28,8 @@ def evaluate(args):
         env=env, test_env=env,log_dir=log_dir, cuda=args.cuda,
         seed=args.seed)
     agent.RENDER = True
-    agent.evaluate()
-
+    agent.evaluate(MPC_certi=True)
+    #agent.offline_eval()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -38,6 +38,6 @@ if __name__ == '__main__':
     parser.add_argument('--shared', action='store_true')
     parser.add_argument('--env_id', type=str, default='myenv')
     parser.add_argument('--cuda', action='store_true')
-    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--seed', type=int, default=2**31-1)
     args = parser.parse_args()
     evaluate(args)

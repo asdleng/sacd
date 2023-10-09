@@ -43,6 +43,7 @@ def run(args):
     agent = Agent(
         env=env, test_env=env, log_dir=log_dir, cuda=args.cuda,
         seed=args.seed)
+    agent.RENDER = False
     agent.run()
 
 

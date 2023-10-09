@@ -98,12 +98,12 @@ def MPC(env,current_state,lane_ind,L, obs,surr_vehicle, n, dt):
             if surr_vehicle[closest_vehicle_front_id][2]<ttc:
                 ttc = surr_vehicle[closest_vehicle_front_id][2]
         if surr_vehicle[closest_vehicle_front_id][3] <100:         
-            obj = obj+ 2000 / surr_vehicle[closest_vehicle_front_id][3]
+            obj = obj+ 4000 / surr_vehicle[closest_vehicle_front_id][3]
     obj = obj + 800 /  ttc
     for i in range(N):
         obj = obj + 0.01*(v[i] - get_ref_spd(x[i],env))**2
         dx = obs[closest_vehicle_front_id][0][i-1][0] - opt_states[i, 0]
-        obj = obj + 1000/(dx**2)
+        obj = obj + 100/(dx**2)
     opti.minimize(obj)
 
     # boundary and control conditions
@@ -289,10 +289,10 @@ def MPC3(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     # define the cost function
     # some addition parameters
     Q = np.array([[0.0, 0.0, 0.0,0.0], 
-    [0.0, 5.0, 0.0,0.0], 
+    [0.0, 10.0, 0.0,0.0], 
     [0.0, 0.0, 0.0,0.0], 
-    [0.0, 0.0, 0.0, 0.0]])
-    R = np.array([[1.0, 0.0], [0.0, 1.0]])
+    [0.0, 0.0, 0.0, 10.0]])
+    R = np.array([[0.0, 0.0], [0.0, 10.0]])
     # cost function
     obj = 0  # cost
     for i in range(N):
@@ -306,7 +306,7 @@ def MPC3(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     #opti.subject_to(opti.bounded(-2.0, x, 2.0))
     opti.subject_to(opti.bounded(-2.0, y, 10.0))
     #opti.subject_to(opti.bounded(-np.pi/4, heading, np.pi/4))
-    opti.subject_to(opti.bounded(10.0, v, 30.0))
+    opti.subject_to(opti.bounded(0.0, v, 30.0))
     opti.subject_to(opti.bounded(-5.0, acc, 5.0))
     opti.subject_to(opti.bounded(-np.pi/4, steer, np.pi/4))
 
@@ -314,7 +314,7 @@ def MPC3(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
                     'ipopt.acceptable_tol': 1e-8, 'ipopt.acceptable_obj_change_tol': 1e-6}
 
     opti.solver('ipopt', opts_setting)
-    final_state = np.array([0.0, lane_ind*4, 25, 0.0])
+    final_state = np.array([0.0, lane_ind*4, 15, 0.0])
     opti.set_value(opt_xs, final_state)
     opti.set_value(opt_x0, current_state)
     #opti.set_initial(opt_controls, np.zeros((N, 2)))  # (N, 2)
@@ -393,7 +393,7 @@ def MPC4(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     [0.0, 10.0, 0.0,0.0], 
     [0.0, 0.0, 0.0,0.0], 
     [0.0, 0.0, 0.0, 10.0]])
-    R = np.array([[1.0, 0.0], [0.0, 10.0]])
+    R = np.array([[0.0, 0.0], [0.0, 10.0]])
     # cost function
     obj = 0  # cost
     for i in range(N):
@@ -401,24 +401,24 @@ def MPC4(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
                               ) + ca.mtimes([opt_controls[i, :], R, opt_controls[i, :].T])
 
     for i in range(N):
-        obj = obj + 0.02*(v[i] - get_ref_spd(x[i],env))**2
+        obj = obj + 0.01*(v[i] - get_ref_spd(x[i],env))**2
         dx = obs[closest_vehicle_front_id][0][i-1][0] - opt_states[i, 0]
-        obj = obj - 0.01*dx**2
+        obj = obj + 1000/(dx**2)
     opti.minimize(obj)
 
     # boundrary and control conditions
     #opti.subject_to(opti.bounded(-2.0, x, 2.0))
-    opti.subject_to(opti.bounded(-2.0, y, 10.0))
+    opti.subject_to(opti.bounded(-3.0, y, 11.0))
     #opti.subject_to(opti.bounded(-np.pi/4, heading, np.pi/4))
-    opti.subject_to(opti.bounded(10.0, v, 30.0))
+    #opti.subject_to(opti.bounded(10.0, v, 30.0))
     opti.subject_to(opti.bounded(-5.0, acc, 5.0))
-    opti.subject_to(opti.bounded(-np.pi/4, steer, np.pi/4))
+    opti.subject_to(opti.bounded(-np.pi/6, steer, np.pi/6))
 
     opts_setting = {'error_on_fail': False, 'ipopt.max_iter': 100, 'ipopt.print_level': 0, 'print_time': 0,
                     'ipopt.acceptable_tol': 1e-8, 'ipopt.acceptable_obj_change_tol': 1e-6}
 
     opti.solver('ipopt', opts_setting)
-    final_state = np.array([0.0, lane_ind*4, 25, 0.0])
+    final_state = np.array([0.0, lane_ind*4, 15, 0.0])
     opti.set_value(opt_xs, final_state)
     opti.set_value(opt_x0, current_state)
     initial_control = np.zeros((N, 2))
@@ -456,7 +456,7 @@ def main():
             "simulation_frequency": 10,
             "policy_frequency": 10,
             "duration": 500,
-            "screen_width": 500,
+            "screen_width": 1000,
             "screen_height": 200,
             "centering_position": [0.5, 0.5],
             "show_trajectories": False,
