@@ -7,16 +7,16 @@ import gymnasium as gym
 from .base import BaseAgent
 from sacd.model import TwinnedQNetwork2, CateoricalPolicy2
 from sacd.utils import disable_gradients
-from .mpc_new import MPC, MPC2, MPC3, MPC4
-from .plot import plot_rewards, plot_durations, plot_offline_rewards
+from .mpc_new import MPC, MPC2, MPC3, MPC4, MPC_des
+from .plot import plot_rewards, plot_durations, plot_offline_rewards,plot_success_rate
 import time
 
 
 class SacdAgent(BaseAgent):
 
-    def __init__(self, env, test_env, log_dir, num_steps=100000, batch_size=1024,
-                 lr=0.0003, memory_size=100000, gamma=0.99, multi_step=1,
-                 target_entropy_ratio=0.98, start_steps=0,
+    def __init__(self, env, test_env, log_dir, num_steps=1000000, batch_size=1024,
+                 lr=0.0003, memory_size=10000, gamma=0.99, multi_step=1,
+                 target_entropy_ratio=0.98, start_steps=10,
                  update_interval=4, target_update_interval=8000,
                  use_per=False, dueling_net=False, num_eval_steps=1000,
                  max_episode_steps=1000, log_interval=10, eval_interval=10000,
@@ -27,11 +27,14 @@ class SacdAgent(BaseAgent):
             target_update_interval, use_per, num_eval_steps, max_episode_steps,
             log_interval, eval_interval, cuda, seed)
         self.seed = seed
-        self.num_episodes = 10000
+        self.num_episodes = 30000
         self.RENDER = False
         self.state_dim = self.env.observation_space.shape[0] * \
             self.env.observation_space.shape[1]
         self.act_dim = 3
+
+        self.continue_train = True
+        self.continue_eval = True
         # 注意，这里是为了避免频繁换道
         self.policy_frequency = 1
         self.env.set_ref_speed("/home/i/sacd/data/constant_speed.txt")
@@ -51,9 +54,10 @@ class SacdAgent(BaseAgent):
         if (self.RENDER):
             self.env.config['offscreen_rendering'] = False
 
-        self.env.config['initial_lane_id'] = 1
+        self.env.config['initial_lane_id'] = np.random.choice([0, 1, 2])
 
         self.try_return_list = []
+        self.try_success_rate_list = []
         #
         self.episode_rewards = []
         self.episode_durations = []
@@ -171,12 +175,21 @@ class SacdAgent(BaseAgent):
             self.log_alpha * (self.target_entropy - entropies)
             * weights)
         return entropy_loss
-
+    def load_models(self, load_dir):
+        self.policy.load(os.path.join(load_dir, 'policy.pth'))
+        self.online_critic.load(os.path.join(load_dir, 'online_critic.pth'))
+        self.target_critic.load(os.path.join(load_dir, 'target_critic.pth'))
+        with open(load_dir+"current_states.txt", "r") as file:
+            self.episodes = int(file.readline().strip())
+            self.steps = int(file.readline().strip())
     def save_models(self, save_dir):
         super().save_models(save_dir)
         self.policy.save(os.path.join(save_dir, 'policy.pth'))
         self.online_critic.save(os.path.join(save_dir, 'online_critic.pth'))
         self.target_critic.save(os.path.join(save_dir, 'target_critic.pth'))
+        with open(save_dir+"current_states.txt", "w") as file:
+            file.write(str(self.episodes) + "\n")
+            file.write(str(self.steps) + "\n")
 
     def get_MPC_actions(self, env, action_d, train=True, eval_MPC_protect=True, horizon=10, dt=0.1):
         action_g = np.array([0.0, 0.0])
@@ -192,16 +205,19 @@ class SacdAgent(BaseAgent):
         no_solution_done = False
 
         if train:
-            # 训练过程，不管约束
-            if target_lane == current_lane:
-                status, u_opt, x_opt, obj_value = MPC4(
+            # 训练过程，不管换道约束
+            if target_lane == current_lane: # 根车
+                status, u_opt, x_opt, obj_value = MPC(
                     env, current_state, current_lane, ego.LENGTH, predict_info, surr_vehicle, horizon, dt)
-            else:
+                if not status:
+                    status, u_opt, x_opt, obj_value = MPC2(
+                        env, current_state, current_lane, ego.LENGTH, predict_info, surr_vehicle, horizon, dt)
+            else:   # 换道
                 status, u_opt, x_opt, obj_value = MPC3(
                     env, current_state, target_lane, ego.LENGTH, predict_info, surr_vehicle, horizon, dt)
             action_g = u_opt[0, :]
             if status == False:
-                reward_no_solution = -0.1
+                reward_no_solution = -1
                 no_solution_done = True
             return action_g, reward_no_solution, no_solution_done
         else:
@@ -244,6 +260,10 @@ class SacdAgent(BaseAgent):
             return action_g, reward_no_solution, no_solution_done
 
     def train_episode(self):
+        if self.continue_train:
+            load_path = "/home/i/sacd/sacd/sacd_current_model/"
+            self.load_models(load_path)
+            self.continue_train = False
         self.episodes += 1
         episode_return = 0.
         episode_steps = 0
@@ -252,6 +272,7 @@ class SacdAgent(BaseAgent):
         state = self.env.reset()
         state = state[0]
         state = state.reshape([self.state_dim])
+        old_state = state
         last_d = 1
         maintain_stp_max = 5
         maintain_stp = 0
@@ -260,6 +281,7 @@ class SacdAgent(BaseAgent):
             self.env.render()
         count = 0
         last_lane = self.env.config['initial_lane_id']
+        action_d = 1
         while (not done and not truncate) and episode_steps <= self.max_episode_steps:
             current_lane = np.clip(round(self.env.vehicle.position[1]/4), 0, 2)
             if count % round(self.env.config['policy_frequency']/self.policy_frequency) == 0:
@@ -278,30 +300,32 @@ class SacdAgent(BaseAgent):
             # elif(maintain_flag and maintain_stp>=maintain_stp_max):
             #     maintain_flag = False
             #     maintain_stp = 0
-            if current_lane != last_lane:  # 换道完成
-                action_d = 1
             action_g, reward_no_solution, no_solution_done = self.get_MPC_actions(self.env,
-                action_d, train=True)
+                action_d, train=True,horizon = 10,dt=0.4)
             next_state, reward, done, truncate, info = self.env.step(action_g)
 
             if (self.RENDER == True):
                 self.env.render()
+
             last_d = action_d
             last_lane = current_lane
-            # reward+=reward_no_solution
-            # done  = done or no_solution_done
+            reward+=reward_no_solution
+            done  = done or no_solution_done    # 无解，也是done
+
             next_state = np.array(next_state).reshape([self.state_dim])
 
             # Clip reward to [-1.0, 1.0].
             # clipped_reward = max(min(reward, 1.0), -1.0)
 
             # To calculate efficiently, set priority=max_priority here.
-            if count % round(self.env.config['policy_frequency']/self.policy_frequency) == 0 or done or truncate:
-                self.memory.append(state, action_d, reward,
-                                   next_state, (done or truncate))
-                self.steps += 1
-                episode_steps += 1
-                episode_return += reward
+            if count>0:
+                if count % round(self.env.config['policy_frequency']/self.policy_frequency) == 0 or done or truncate:
+                    self.memory.append(old_state, action_d, reward,
+                                    next_state, (done or truncate))
+                    old_state = next_state
+                    self.steps += 1
+                    episode_steps += 1
+                    episode_return += reward
 
             state = next_state
 
@@ -327,6 +351,8 @@ class SacdAgent(BaseAgent):
             # plot_durations(self.episode_durations)
             filename = f"sacd_model/model_SACD_episode_{self.episodes}.pth"
             torch.save(self.policy.state_dict(), filename)
+            current_save_path = "/home/i/sacd/sacd/sacd_current_model/"
+            self.save_models(current_save_path)
             # self.writer.add_scalar(
             #     'reward/train', self.train_return.get(), self.steps)
 
@@ -353,10 +379,37 @@ class SacdAgent(BaseAgent):
     def offline_eval(self):
         std_return_list = []
         return_list = []
+        success_rate_list = []
         min_return_list = []
         max_return_list = []
         j = 1
-        while j <= 1000:
+        if self.continue_eval:
+            file_path = "/home/i/sacd/sacd/sacd_current_model/eval_data.txt"
+            with open(file_path, 'r') as file:
+                # Iterate through each line in the file
+                for line in file:
+                    # Split the line into individual numbers and convert them to integers
+                    numbers = [float(x) for x in line.split()]
+                    return_list.append(sum(numbers)/len(numbers))
+                    max_return_list.append(max(numbers))
+                    min_return_list.append(min(numbers))
+                    j = j+1
+                    # Append the list of numbers to the 2D list
+            file_path = "/home/i/sacd/sacd/sacd_current_model/eval_suc_rate.txt"
+            with open(file_path, 'r') as file:
+                # Iterate through each line in the file
+                for line in file:
+                    # Split the line into individual numbers and convert them to integers
+                    numbers = [float(x) for x in line.split()]
+                    success_rate_list.append(sum(numbers)/len(numbers))
+                    # Append the list of numbers to the 2D list
+        else:
+            # 清空文件
+            with open("/home/i/sacd/sacd/sacd_current_model/eval_data.txt", 'w'):
+                pass
+            with open("/home/i/sacd/sacd/sacd_current_model/eval_suc_rate.txt", 'w'):
+                pass
+        while j <= 3010:
             num = str(j)
             file_path = "/home/i/sacd/sacd_model/model_SACD_episode_"+num+"0.pth"
             try:
@@ -366,11 +419,14 @@ class SacdAgent(BaseAgent):
                 print("======Evaluating", j*10, "th model======")
                 threads = []
                 self.try_return_list.clear()
-                num_of_eval = 20
-                num_of_thread = 4
+                self.try_success_rate_list.clear()
+                num_of_eval = 8
+                num_of_thread = 8
                 num_of_eval_each_thread = int(
                     np.floor(num_of_eval/num_of_thread))
                 try_return_q = multiprocessing.Queue()
+                try_suc_rate_q = multiprocessing.Queue()
+                n = 1
                 for i in range(num_of_thread):
                     if i < (num_of_thread-1):
                         try_num_thread = num_of_eval_each_thread
@@ -378,7 +434,8 @@ class SacdAgent(BaseAgent):
                     else:
                         try_num_thread = num_of_eval
                     thread = multiprocessing.Process(
-                        target=self.evaluate_one_thread, args=(try_num_thread,try_return_q,))
+                        target=self.evaluate_one_thread, args=(try_num_thread,try_return_q,try_suc_rate_q,n,))
+                    n+=num_of_eval_each_thread
                     threads.append(thread)
                 for i in range(num_of_thread):
                     threads[i].start()
@@ -387,25 +444,36 @@ class SacdAgent(BaseAgent):
                 for i in range(num_of_thread):
                     res = try_return_q.get()
                     self.try_return_list.append(res)
+                    rate = try_suc_rate_q.get()
+                    self.try_success_rate_list.append(rate)
                 self.try_return_list = [
                     item for sublist in self.try_return_list for item in sublist]
+                self.try_success_rate_list = [
+                    item for sublist in self.try_success_rate_list for item in sublist]
+                success_rate = sum(self.try_success_rate_list)/len(self.try_success_rate_list)
                 mean_return = sum(self.try_return_list) / \
                     len(self.try_return_list)
                 max_return = max(self.try_return_list)
                 min_return = min(self.try_return_list)
                 std_return = np.std(self.try_return_list)/np.sqrt(len(self.try_return_list))
-                with open('eval_data.txt', 'a') as file:
+                with open('/home/i/sacd/sacd/sacd_current_model/eval_data.txt', 'a') as file:
                     file.write(' '.join(map(str, self.try_return_list)) + '\n')
+                with open('/home/i/sacd/sacd/sacd_current_model/eval_suc_rate.txt', 'a') as file:
+                    file.write(' '.join(map(str, self.try_success_rate_list)) + '\n')
                 print("最大Return为：", max_return)
                 print("平均Return为：", mean_return)
                 print("最小Return为：", min_return)
                 print("Return Std为：",std_return)
+                print("成功率为：",success_rate)
+                success_rate_list.append(success_rate)
                 return_list.append(mean_return)
                 max_return_list.append(max_return)
                 min_return_list.append(min_return)
                 std_return_list.append(std_return)
                 plot_offline_rewards(
-                    return_list, max_return_list, min_return_list,std_return_list, save=True)
+                    return_list, max_return_list, min_return_list,std_return_list, save=True,figure_num=1)
+                time.sleep(0.1)
+                plot_success_rate(success_rate_list,save=True,figure_num2 =2)
                 time.sleep(0.1)
                 j = j+1
             except FileNotFoundError:
@@ -414,8 +482,9 @@ class SacdAgent(BaseAgent):
 
         plot_offline_rewards(return_list, max_return_list,
                              min_return_list, save=True)
+        plot_success_rate(success_rate_list,save=True)
 
-    def evaluate_one_thread(self, try_num_thread,try_return_q):
+    def evaluate_one_thread(self, try_num_thread,try_return_q,try_suc_rate_q,seed):
         one_thread_env = gym.make("myenv",  render_mode='rgb_array')
         one_thread_env.set_ref_speed("/home/i/sacd/data/constant_speed.txt")
         # one_thread_env.set_ref_speed("/home/i/sacd/data/mountain_curve.txt")
@@ -434,7 +503,7 @@ class SacdAgent(BaseAgent):
         if (self.RENDER):
             one_thread_env.config['offscreen_rendering'] = False
 
-        one_thread_env.config['initial_lane_id'] = 1
+        one_thread_env.config['initial_lane_id'] = np.random.choice([0, 1, 2])
         if (self.RENDER):
             one_thread_env.config['offscreen_rendering'] = False
         # print("Fuck")
@@ -445,9 +514,13 @@ class SacdAgent(BaseAgent):
         max_return = -10000
         min_return = 10000
         try_return_list = []
+        try_suc_rate_list = []
         while try_num < try_num_thread:
             try_num += 1
-            state = one_thread_env.reset()
+            state = one_thread_env.reset(seed = seed)
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            seed+=1
             state = state[0]
             state = state.reshape([self.state_dim])
             episode_steps = 0
@@ -486,13 +559,76 @@ class SacdAgent(BaseAgent):
                 if done or truncate:
                     print("回合Return为：", episode_return)
                     try_return_list.append(episode_return)
-            
+                    if done:
+                        try_suc_rate_list.append(0)
+                    elif truncate:
+                        try_suc_rate_list.append(1)
             num_episodes += 1
             # eposide_error_array = np.append(eposide_error_array,eposide_error/stp)
         try_return_q.put(try_return_list)
+        try_suc_rate_q.put(try_suc_rate_list)
+    def MPC_eval(self):
+        num_episodes = 0
+        num_steps = 0
+        total_return = 0.0
+        eposide_error_array = []
+        eposide_return_array = []
+        if (self.RENDER):
+            self.env.config['offscreen_rendering'] = False
+        crash_num = 0
+        try_num = 0
+        
+        while try_num < 10:
+            self.seed+=1
+            try_num += 1
+            state = self.env.reset(seed=self.seed)
+            state = state[0]
+            state = state.reshape([self.state_dim])
+            episode_steps = 0 
+            episode_return = 0.0
+            done, truncate = False, False
+            stp = 0
+            eposide_error = 0
+            count = 0
+            last_action_is_change = False
+            lane_change_finished = False
+            change_flag  = False
+            lane_change_count = 0
+            target_lane = self.env.config["initial_lane_id"]
+            no_solution_flag = False
+            while (not done and not truncate):
+                stp += 1
+                if (self.RENDER == True):
+                    self.env.render()
+                action_g,last_action_is_change,target_lane,change_flag,lane_change_count,no_solution_flag = MPC_des(self.env,last_action_is_change,count,target_lane,change_flag,lane_change_count,no_solution_flag,horizon = 10,dt = 0.4)
+                next_state, reward, done, truncate, info = self.env.step(action_g)
+                if count % round(self.env.config['policy_frequency']/self.policy_frequency) == 0:
+                    episode_steps += 1
+                    episode_return += reward
+                error = abs(info['speed']-self.env.get_ref_speed()[0])
+                eposide_error += error
+                count += 1
+            num_episodes += 1
+            total_return += episode_return
+
+            if done:
+                crash_num += 1
+            if done or truncate:
+                print("回合误差为：", eposide_error/stp)
+                print("回合奖励为：",episode_return)
+                eposide_error_array = np.append(
+                    eposide_error_array, eposide_error/stp)
+                eposide_return_array = np.append(
+                    eposide_return_array,episode_return)
+        end_time = time.time()
+        mean_return = total_return / num_episodes
+        print("碰撞", crash_num, "/", try_num, "次")
+        print("平均误差为：", np.sqrt(np.mean(eposide_error_array**2)))
+        print("平均奖励为：", mean_return)
+        self.env.close()
 
     def evaluate(self, process=0, MPC_certi=True):
-        self.policy.load("/home/i/sacd/sacd_model/model_SACD_episode_10000.pth")
+        self.policy.load("/home/i/sacd/sacd_model/model_SACD_episode_21680.pth")
         self.policy.eval()
         num_episodes = 0
         num_steps = 0
@@ -546,7 +682,7 @@ class SacdAgent(BaseAgent):
                     action_d = 1
                 last_current_lane = current_lane
                 action_g, reward_no_solution, no_solution_done = self.get_MPC_actions(
-                    self.env,action_d, train=False, horizon=10, eval_MPC_protect=MPC_certi)
+                    self.env,action_d, train=False, horizon=10, eval_MPC_protect=MPC_certi,dt=0.1)
                 next_state, reward, done, truncate, info = self.env.step(
                     action_g)
                 last_d = action_d

@@ -24,6 +24,15 @@ import seaborn as sns
 #     plt.pause(0.001)  # pause a bit so that plots are updated
 #     if save:
 #         plt.savefig('eval_rewards')
+def plot_success_rate(success_rate,figure_num2=2,save=False):
+    plt.figure(figure_num2)
+    plt.xlabel('Episode')
+    plt.ylabel('Success Rate')
+    X = (np.arange(len(success_rate))+1)*10
+    plt.plot(X,success_rate,color='blue')
+    plt.pause(0.001)  # pause a bit so that plots are updated
+    if save:
+        plt.savefig('success_rate')
 
 def plot_offline_rewards(mean_return_list,max_return_list=[],min_return_list=[],std_return_list=[],save=False,figure_num=1):
     plt.figure(figure_num)
@@ -97,7 +106,7 @@ def main():
     data = []
 
     # Open the text file for reading
-    with open('eval_data.txt', 'r') as file:
+    with open('/home/i/sacd/sacd/sacd_current_model/eval_data.txt', 'r') as file:
         # Iterate through each line in the file
         for line in file:
             # Split the line into individual numbers and convert them to integers
@@ -113,13 +122,14 @@ def main():
     #plot_offline_rewards(means)
     transposed_data = [[row[i] for row in data] for i in range(len(data[0]))]
 
-    y_data = smooth(transposed_data, 50)
+    y_data = smooth(transposed_data, 10)
     x_data = (np.arange(len(y_data[0]))+1)*10
     sns.set(style="darkgrid", font_scale=1.5)
     color = ['r', 'g', 'b', 'k']
     label = ['algo1', 'algo2', 'algo3', 'algo4']
     linestyle = ['-', '--', ':', '-.']
     sns.tsplot(time=x_data, data=y_data, color=color[2], linestyle=linestyle[0])
+    plt.savefig("smoothed_figure")
     plt.show()
     print("fuck")
 if __name__=="__main__":

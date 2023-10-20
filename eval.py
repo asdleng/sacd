@@ -27,10 +27,10 @@ def evaluate(args):
     agent = Agent(
         env=env, test_env=env,log_dir=log_dir, cuda=args.cuda,
         seed=args.seed)
-    agent.RENDER = True
-    agent.evaluate(MPC_certi=True)
-    #agent.offline_eval()
-
+    agent.RENDER = False
+    #agent.evaluate(MPC_certi=True)
+    agent.offline_eval()
+    #agent.MPC_eval()
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
