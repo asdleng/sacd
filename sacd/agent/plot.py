@@ -26,9 +26,9 @@ import seaborn as sns
 #         plt.savefig('eval_rewards')
 def plot_success_rate(success_rate,figure_num2=2,save=False):
     plt.figure(figure_num2)
-    plt.xlabel('Episode')
+    plt.xlabel('Steps')
     plt.ylabel('Success Rate')
-    X = (np.arange(len(success_rate))+1)*10
+    X = (np.arange(len(success_rate)))*100
     plt.plot(X,success_rate,color='blue')
     plt.pause(0.001)  # pause a bit so that plots are updated
     if save:
@@ -36,9 +36,9 @@ def plot_success_rate(success_rate,figure_num2=2,save=False):
 
 def plot_offline_rewards(mean_return_list,max_return_list=[],min_return_list=[],std_return_list=[],save=False,figure_num=1):
     plt.figure(figure_num)
-    plt.xlabel('Episode')
+    plt.xlabel('Steps')
     plt.ylabel('Average Mean Rewards')
-    X = (np.arange(len(mean_return_list))+1)*10
+    X = (np.arange(len(mean_return_list)))*100
     #plt.plot(X,min_return_list,color='blue')
     plt.plot(X,mean_return_list,color='blue')
     #plt.errorbar(X, mean_return_list, yerr=std_return_list, fmt='o-', capsize=5)
@@ -122,8 +122,8 @@ def main():
     #plot_offline_rewards(means)
     transposed_data = [[row[i] for row in data] for i in range(len(data[0]))]
 
-    y_data = smooth(transposed_data, 10)
-    x_data = (np.arange(len(y_data[0]))+1)*10
+    y_data = smooth(transposed_data, 20)
+    x_data = (np.arange(len(y_data[0]))+1)*100
     sns.set(style="darkgrid", font_scale=1.5)
     color = ['r', 'g', 'b', 'k']
     label = ['algo1', 'algo2', 'algo3', 'algo4']

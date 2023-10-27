@@ -98,14 +98,15 @@ def MPC(env,current_state,lane_ind,L, obs,surr_vehicle, n, dt):
             if surr_vehicle[closest_vehicle_front_id][2]<ttc:
                 ttc = surr_vehicle[closest_vehicle_front_id][2]
         if surr_vehicle[closest_vehicle_front_id][3] <100:         
-            obj = obj+ 10000 / surr_vehicle[closest_vehicle_front_id][3]
+            obj = obj+ 1000 / surr_vehicle[closest_vehicle_front_id][3]
     obj = obj + 800 /  ttc
     for i in range(N):
         obj = obj + 0.01*(v[i] - get_ref_spd(x[i],env))**2
+        obj = obj+ 0.01*(x[i] - env.get_t_x(env.time+i*dt))**2
         if closest_vehicle_front_id>=0: # 有前车
             dx = obs[closest_vehicle_front_id][0][i-1][0] - opt_states[i, 0]
             obj = obj + 500/(dx**2)
-        obj = obj+ 0.01*(x[i] - env.get_t_x(env.time+i*dt))**2
+        
     opti.minimize(obj)
 
     # boundary and control conditions
@@ -212,7 +213,7 @@ def MPC2(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     opti.subject_to(opti.bounded(-2.0, y, 10.0))
     #opti.subject_to(opti.bounded(-np.pi/4, heading, np.pi/4))
     opti.subject_to(opti.bounded(0.0, v, 30.0))
-    opti.subject_to(opti.bounded(-3.0, acc, 3.0))
+    opti.subject_to(opti.bounded(-5.0, acc, 3.0))
     opti.subject_to(opti.bounded(-np.pi/4, steer, np.pi/4))
 
     opts_setting = {'error_on_fail': False, 'ipopt.max_iter': 100, 'ipopt.print_level': 0, 'print_time': 0,
@@ -223,12 +224,12 @@ def MPC2(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     opti.set_value(opt_xs, final_state)
     opti.set_value(opt_x0, current_state)
     initial_control = np.zeros((N, 2))
-    initial_control[:,0] = -3
+    initial_control[:,0] = -4.9
     opti.set_initial(opt_controls, initial_control)  # (N, 2)
     initial_states = np.zeros((N+1,4))
     initial_states[0, :] = current_state
     for i in range(N):
-        initial_states[i+1, :] = initial_states[i, :] + f_np(initial_states[i, :], np.array([-3,0]))*T
+        initial_states[i+1, :] = initial_states[i, :] + f_np(initial_states[i, :], np.array([-4.9,0]))*T
     opti.set_initial(opt_states, initial_states)  # (N+1, 3)
     try:
       sol = opti.solve()
@@ -300,6 +301,8 @@ def MPC3(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
     for i in range(N):
         obj = obj + ca.mtimes([(opt_states[i, :]-opt_xs.T), Q, (opt_states[i, :]-opt_xs.T).T]
                               ) + ca.mtimes([opt_controls[i, :], R, opt_controls[i, :].T])
+        obj = obj + 0.01*(v[i] - get_ref_spd(x[i],env))**2
+        obj = obj+ 0.01*(x[i] - env.get_t_x(env.time+i*dt))**2
     opti.minimize(obj)
 
     # boundrary and control conditions
@@ -331,114 +334,7 @@ def MPC3(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
       return True, u_res, x_m, obj_value
     except RuntimeError:
       return False, np.zeros((N, 2)), initial_states, np.inf
-'''训练时用，保证直行，跟随前车
-'''
-def MPC4(env,current_state,lane_ind, L, obs, surr_vehicle, n, dt):
-    current_lane = np.clip(round(env.vehicle.position[1]/4),0,2)
-    T = dt
-    N = n
 
-    opti = ca.Opti()
-    # control variables, acc and steer
-    opt_controls = opti.variable(N, 2)
-    acc = opt_controls[:, 0]
-    steer = opt_controls[:, 1]
-    # states, x, y and heading
-    opt_states = opti.variable(N+1, 4)
-    x = opt_states[:, 0]
-    y = opt_states[:, 1]
-    v = opt_states[:, 2]
-    heading = opt_states[:, 3]
-
-    # parameters
-    opt_x0 = opti.parameter(4)
-    opt_xs = opti.parameter(4)
-    # create model
-
-    def f(x_, u_): 
-        beta = ca.arctan(1 / 2 * ca.tan(u_[1]))
-        return ca.vertcat(
-        x_[2]*ca.cos(x_[3]+beta), x_[2]*ca.sin(x_[3]+beta), u_[0], x_[2]/L*ca.sin(beta))
-    def f_np(x_, u_): 
-        beta = np.arctan(1 / 2 * np.tan(u_[1]))
-        return np.array(
-        [x_[2]*np.cos(x_[3]+beta), x_[2]*np.sin(x_[3]+beta), u_[0], x_[2]/L*np.sin(beta)])
-
-    # init_condition
-    opti.subject_to(opt_states[0, :] == opt_x0.T)
-    for i in range(N):
-        x_next = opt_states[i, :] + f(opt_states[i, :], opt_controls[i, :]).T*T
-        opti.subject_to(opt_states[i+1, :] == x_next)
-    # add constraints to obstacle distance
-    closest_vehicle_front_id = -1
-    min_dis = 100000
-    for i in range(len(obs)):
-        if surr_vehicle[i][1] == lane_ind:  # same lane surr vehicle
-            # if surr_vehicle[i][0] == 1 and surr_vehicle[i][3] <10: # behind
-            #     for j in range(1,N+1):
-            #         dx = opt_states[j, 0]-obs[i][0][j-1][0]
-            #         opti.subject_to(dx - 5>0)
-            if surr_vehicle[i][0] == 0 and surr_vehicle[i][3] <200: # front
-                for j in range(1,N+1):
-                    dx = obs[i][0][j-1][0] - opt_states[j, 0]
-                    opti.subject_to((dx - 6)>0)
-                ## 第一遍遍历，得到最近前车
-                dis = surr_vehicle[i][3]
-                if dis<min_dis:
-                    min_dis = dis
-                    closest_vehicle_front_id = i
-    # define the cost function
-    # some addition parameters
-    Q = np.array([[0.0, 0.0, 0.0,0.0], 
-    [0.0, 10.0, 0.0,0.0], 
-    [0.0, 0.0, 0.0,0.0], 
-    [0.0, 0.0, 0.0, 10.0]])
-    R = np.array([[0.0, 0.0], [0.0, 10.0]])
-    # cost function
-    obj = 0  # cost
-    for i in range(N):
-        obj = obj + ca.mtimes([(opt_states[i, :]-opt_xs.T), Q, (opt_states[i, :]-opt_xs.T).T]
-                              ) + ca.mtimes([opt_controls[i, :], R, opt_controls[i, :].T])
-
-    for i in range(N):
-        obj = obj + 0.01*(v[i] - get_ref_spd(x[i],env))**2
-        dx = obs[closest_vehicle_front_id][0][i-1][0] - opt_states[i, 0]
-        obj = obj + 500/(dx**2)
-        
-    opti.minimize(obj)
-
-    # boundrary and control conditions
-    #opti.subject_to(opti.bounded(-2.0, x, 2.0))
-    opti.subject_to(opti.bounded(-3.0, y, 11.0))
-    #opti.subject_to(opti.bounded(-np.pi/4, heading, np.pi/4))
-    #opti.subject_to(opti.bounded(10.0, v, 30.0))
-    opti.subject_to(opti.bounded(-3.0, acc, 3.0))
-    opti.subject_to(opti.bounded(-np.pi/6, steer, np.pi/6))
-
-    opts_setting = {'error_on_fail': False, 'ipopt.max_iter': 100, 'ipopt.print_level': 0, 'print_time': 0,
-                    'ipopt.acceptable_tol': 1e-8, 'ipopt.acceptable_obj_change_tol': 1e-6}
-
-    opti.solver('ipopt', opts_setting)
-    final_state = np.array([0.0, lane_ind*4, 15, 0.0])
-    opti.set_value(opt_xs, final_state)
-    opti.set_value(opt_x0, current_state)
-    initial_control = np.zeros((N, 2))
-    initial_control[:,0] = -3
-    #opti.set_initial(opt_controls,initial_control)  # (N, 2)
-
-    initial_states = np.zeros((N+1,4))
-    initial_states[0, :] = current_state
-    for i in range(N):
-        initial_states[i+1, :] = initial_states[i, :] + f_np(initial_states[i, :], np.array([-3,0]))*T
-    #opti.set_initial(opt_states, initial_states)  # (N+1, 3)
-    try:
-      sol = opti.solve()
-      u_res = sol.value(opt_controls)
-      x_m = sol.value(opt_states)
-      obj_value = sol.value(obj)
-      return True, u_res, x_m, obj_value
-    except RuntimeError:
-      return False, np.zeros((N, 2)), initial_states, np.inf
 
 # 计算目标速度
 def get_ref_spd(x,env):
@@ -456,7 +352,7 @@ policy_frequency = 1
 lane_change_fix_step_num = 3
 def MPC_des(env,last_action_is_change,count,target_lane,change_flag,lane_change_count,no_solution_flag,horizon = 10,dt = 0.1):
     ego = env.vehicle
-    
+    action = np.array([0,0])
     current_state = np.array([ego.position[0],ego.position[1],ego.speed,ego.heading])
     predict_info,surr_vehicle = env.predict(horizon,dt)
     current_lane = round(ego.position[1]/4)
@@ -464,7 +360,7 @@ def MPC_des(env,last_action_is_change,count,target_lane,change_flag,lane_change_
     candidate_lane = np.array([0,1,2])
     
     status = [0,0,0]
-    u_opt = [0,0,0]
+    u_opt = [np.array([0,0]),np.array([0,0]),np.array([0,0])]
     x_opt = [0,0,0]
     obj_value = [0,0,0]
     if(count % round(env.config['policy_frequency']/policy_frequency) == 0):
@@ -506,13 +402,17 @@ def MPC_des(env,last_action_is_change,count,target_lane,change_flag,lane_change_
         #     action = u_opt[target_lane][0]    
         #     state_pre = x_opt[target_lane][1]
         # else:
-        action = u_opt[best_sol][0]    
-        state_pre = x_opt[best_sol][1]
+        if not best_sol == np.inf:
+            action = u_opt[best_sol][0]    
+        else:
+            action = np.array([0,0])
+        #state_pre = x_opt[best_sol][1]
         if no_solution_flag == True:
+
             status_, u_opt_, x_opt_, obj_value_ = MPC2(env,current_state,best_sol,ego.LENGTH, predict_info,surr_vehicle, horizon, dt)
             if status_ == False:
                 print("Totally no solution!")
-                action[0] = -3
+                action[0] = -5
             else:
                 action = u_opt_[0]
             no_solution_flag = False
@@ -524,7 +424,7 @@ def MPC_des(env,last_action_is_change,count,target_lane,change_flag,lane_change_
             action = u_opt_[0]
             if status_ == False:
                 print("Totally no solution!")
-                action[0] = -3
+                action[0] = -5
     
     return action,last_action_is_change,target_lane,change_flag,lane_change_count,no_solution_flag
 def main():

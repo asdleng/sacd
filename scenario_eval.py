@@ -1,11 +1,27 @@
+import openpyxl
 import numpy as np
 import matplotlib.pyplot as plt
-from sacd.agent.mpc_new import MPC,MPC2,MPC3,MPC4,MPC_des
+from sacd.agent.mpc_new import MPC,MPC2,MPC3,MPC_des
 from sacd.agent.sacd import SacdAgent
 import gymnasium as gym
 from sacd.agent.energy_cost import energy_cost
+from sacd.agent.speed_generator import normalize_speed
+
+def write_excel_xlsx(path, sheet_name, value):
+    index = len(value)
+    workbook = openpyxl.Workbook()
+    if sheet_name not in workbook.sheetnames:
+        workbook.create_sheet(title=sheet_name)
+        
+    sheet = workbook[sheet_name]
+    for i in range(0, index):
+        for j in range(0, len(value[i])):
+            sheet.cell(row=i+1, column=j+1, value=str(value[i][j]))
+    workbook.save(path)
+
+
 MPC_flag = False # use rule-based or RL
-scenario_num = 2
+scenario_num = 3
 seed = 1
 spd_segs = []
 s_t_segs = []
@@ -60,7 +76,7 @@ env.configure(
                 "render_agent": False,
                 "offscreen_rendering": False,
                 "initial_lane_id": 1,
-                "vehicles_density":1.5,
+                "vehicles_density":1.2,
                 "ego_spacing":1.5
             })
 env.config['initial_lane_id'] = 1
@@ -69,7 +85,7 @@ log_dir = "/home/i/sacd/logs/myenv"
 sacdagent = SacdAgent(env,env,log_dir)
 sacdagent.RENDER = True
 #sacdagent.policy.load("/home/i/sacd/sacd/sacd_current_model/policy.pth")
-sacdagent.policy.load("/home/i/sacd/sacd_model/model_SACD_episode_670.pth")
+sacdagent.policy.load("/home/i/sacd/sacd_model/model_SACD_steps_8300.pth")
 sacdagent.policy.eval()
 total_return = 0
 
@@ -79,7 +95,7 @@ total_delay = 0
 
 # MPC_des
 
-
+lane_change_num = 0
 spd_segs_track = []
 spd_segs_track_v = []
 spd_segs_track_s = []
@@ -119,9 +135,13 @@ for i in range(len(spd_segs)):
         
         if MPC_flag:
             action_g,last_action_is_change,target_lane,change_flag,lane_change_count,no_solution_flag = MPC_des(env,last_action_is_change,count,target_lane,change_flag,lane_change_count,no_solution_flag,horizon = 10,dt = 0.4)
+            if not isinstance(action_g,np.ndarray):
+                action_g = np.array([0,0])
+            current_lane = np.clip(round(env.vehicle.position[1]/4),0,2)
         else:
             if count % round(env.config['policy_frequency']/policy_frequency) == 0:
-                action_d = sacdagent.exploit(state)
+                speed_seq = normalize_speed(env.get_speed_seq(100))
+                action_d = sacdagent.exploit(state,speed_seq)
                 current_lane = np.clip(round(env.vehicle.position[1]/4),0,2)
                 if action_d !=1:
                     ## 标记下换道前的车道
@@ -138,9 +158,10 @@ for i in range(len(spd_segs)):
                     last_action_is_change = True
             action_g, reward_no_solution, no_solution_done = sacdagent.get_MPC_actions(
                 env,action_d, train=False, horizon=10, eval_MPC_protect=True,dt=0.4)
-        
         next_state, reward, done, truncate, info = env.step(action_g)
-
+        if last_current_lane!=current_lane:
+            lane_change_num+=1
+            last_current_lane = current_lane
         if count % round(env.config['policy_frequency']/policy_frequency) == 0:
             episode_steps += 1
             episode_return += reward
@@ -162,10 +183,31 @@ for i in range(len(spd_segs)):
     print("段奖励为：",round(episode_return,2))
     print("段终端延误为：",round(delay,2))
 
-
+env.close()
+if MPC_flag:
+    print("====使用的是Rule+MPC====")
+else:
+    print("====使用的是RL====")
 print("总奖励为：", round(total_return,2))
 print("平均误差为：", round(total_error/total_stp,2))
 print("平均终端延误为：",round(total_delay/len(spd_segs),2))
+print("换道次数为：",lane_change_num)
+
+book_name_xlsx = 'scenario_data.xlsx'
+sheet_name_xlsx = 'scenario_'+str(scenario_num)
+
+if MPC_flag:
+    sheet_name_xlsx = sheet_name_xlsx+'_Rule+MPC'
+else:
+    sheet_name_xlsx = sheet_name_xlsx+'_RL'
+value = [["总奖励",str(round(total_return,2))],
+                ["平均误差",str(round(total_error/total_stp,2))],
+                [ "平均终端延误", str(round(total_delay/len(spd_segs),2))],
+                [ "换道次数", lane_change_num],]
+
+write_excel_xlsx(book_name_xlsx, sheet_name_xlsx, value)
+
+
 total_energy_target = 0
 total_energy_track = 0
 for i in range(len(spd_segs)):

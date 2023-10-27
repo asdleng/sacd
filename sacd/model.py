@@ -49,13 +49,27 @@ class DQNBase2(BaseNetwork):
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, num_hidden_units),
-            nn.ReLU(),
-            nn.Linear(num_hidden_units, num_hidden_units),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
         ).apply(initialize_weights_he)
 
-    def forward(self, states):
-        return self.net(states)
+        self.speed_sequence_net = nn.Sequential(
+            nn.Conv1d(1,10, kernel_size=5),  # Adjust kernel size as needed
+            nn.ReLU(inplace=True),
+            nn.MaxPool1d(10)
+        ).apply(initialize_weights_he)
+
+        self.final_net = nn.Sequential(
+            nn.Linear(num_hidden_units+90, num_hidden_units),  # Combine both inputs
+            nn.ReLU(inplace=True),
+        ).apply(initialize_weights_he)
+
+    def forward(self, states, speed_sequence):
+        original_output = self.net(states)
+        speed_sequence = speed_sequence.view(speed_sequence.size(0), 1, -1)  # Add channel dimension
+        speed_sequence_output = self.speed_sequence_net(speed_sequence)
+        speed_sequence_output = speed_sequence_output.view(speed_sequence_output.size(0), -1)
+        combined_output = torch.cat((original_output, speed_sequence_output), dim=1)
+        return self.final_net(combined_output)
 
 class QNetwork2(BaseNetwork):
     
@@ -70,23 +84,23 @@ class QNetwork2(BaseNetwork):
             self.head = nn.Sequential(
                 nn.Linear(128, 128),
                 nn.ReLU(inplace=True),
-                nn.Linear(128, num_actions))
+                nn.Linear(128, num_actions)).apply(initialize_weights_he)
         else:
             self.a_head = nn.Sequential(
                 nn.Linear(128, 128),
                 nn.ReLU(inplace=True),
-                nn.Linear(128, num_actions))
+                nn.Linear(128, num_actions)).apply(initialize_weights_he)
             self.v_head = nn.Sequential(
                 nn.Linear(128, 128),
                 nn.ReLU(inplace=True),
-                nn.Linear(128, 1))
+                nn.Linear(128, 1)).apply(initialize_weights_he)
 
         self.shared = shared
         self.dueling_net = dueling_net
 
-    def forward(self, states):
+    def forward(self, states,speed_seq):
         if not self.shared:
-            states = self.conv(states)
+            states = self.conv(states,speed_seq)
 
         if not self.dueling_net:
             return self.head(states)
@@ -198,18 +212,18 @@ class CateoricalPolicy2(BaseNetwork):
 
         self.shared = shared
 
-    def act(self, states):
+    def act(self, states,speed_seq):
         if not self.shared:
-            states = self.conv(states)
+            states = self.conv(states,speed_seq)
 
         action_logits = self.head(states)
         greedy_actions = torch.argmax(
             action_logits, dim=1, keepdim=True)
         return greedy_actions
 
-    def sample(self, states):
+    def sample(self, states,speed_seq):
         if not self.shared:
-            states = self.conv(states)
+            states = self.conv(states,speed_seq)
 
         action_probs = F.softmax(self.head(states), dim=1)
         action_dist = Categorical(action_probs)
@@ -228,10 +242,11 @@ class TwinnedQNetwork2(BaseNetwork):
         self.Q1 = QNetwork2(num_channels, num_actions, shared, dueling_net)
         self.Q2 = QNetwork2(num_channels, num_actions, shared, dueling_net)
 
-    def forward(self, states):
-        q1 = self.Q1(states)
-        q2 = self.Q2(states)
+    def forward(self, states,speed_seq):
+        q1 = self.Q1(states,speed_seq)
+        q2 = self.Q2(states,speed_seq)
         return q1, q2
+
 def hidden_init(layer):
     fan_in = layer.weight.data.size()[0]
     lim = 1. / np.sqrt(fan_in)

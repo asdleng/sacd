@@ -43,6 +43,7 @@ class BaseAgent(ABC):
             self.memory = LazyMultiStepMemory(
                 capacity=memory_size,
                 state_shape=self.env.observation_space.shape[0]*self.env.observation_space.shape[1],
+                speed_seq_shape=100,
                 device=self.device, gamma=gamma, multi_step=multi_step)
 
         self.log_dir = log_dir
@@ -82,11 +83,11 @@ class BaseAgent(ABC):
             and self.steps >= self.start_steps
 
     @abstractmethod
-    def explore(self, state):
+    def explore(self, state, speed_seq):
         pass
 
     @abstractmethod
-    def exploit(self, state):
+    def exploit(self, state, speed_seq):
         pass
 
     @abstractmethod
@@ -94,11 +95,11 @@ class BaseAgent(ABC):
         pass
 
     @abstractmethod
-    def calc_current_q(self, states, actions, rewards, next_states, dones):
+    def calc_current_q(self, states, speed_seq1, actions, rewards, next_states, speed_seq2, dones):
         pass
 
     @abstractmethod
-    def calc_target_q(self, states, actions, rewards, next_states, dones):
+    def calc_target_q(self, states, speed_seq1, actions, rewards, next_states, speed_seq2, dones):
         pass
 
     @abstractmethod
