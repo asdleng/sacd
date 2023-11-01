@@ -16,7 +16,7 @@ class SacdAgent(BaseAgent):
 
     def __init__(self, env, test_env, log_dir, num_steps=200000, batch_size=256,
                  lr=0.0001, memory_size=100000, gamma=0.99, multi_step=1,
-                 target_entropy_ratio=0.5, start_steps=10,
+                 target_entropy_ratio=0.95, start_steps=10,
                  update_interval=1, target_update_interval=1000,
                  use_per=False, dueling_net=False, num_eval_steps=1000,
                  max_episode_steps=1000, log_interval=100, eval_interval=10000,
@@ -33,8 +33,8 @@ class SacdAgent(BaseAgent):
             self.env.observation_space.shape[1]
         self.act_dim = 3
 
-        self.continue_train = False
-        self.continue_eval = False
+        self.continue_train = True
+        self.continue_eval = True
         # 注意，这里是为了避免频繁换道
         self.policy_frequency = 1
         # self.env.set_ref_speed("/home/i/sacd/data/constant_speed.txt")
@@ -179,6 +179,8 @@ class SacdAgent(BaseAgent):
         return entropy_loss
 
     def load_models(self, load_dir):
+        self.memory = self.memory.load_replay_buffer(os.path.join(load_dir, 'replay_buffer.pkl'))
+
         self.policy.load(os.path.join(load_dir, 'policy.pth'))
         self.online_critic.load(os.path.join(load_dir, 'online_critic.pth'))
         self.target_critic.load(os.path.join(load_dir, 'target_critic.pth'))
@@ -187,6 +189,7 @@ class SacdAgent(BaseAgent):
             self.steps = int(file.readline().strip())
     def save_models(self, save_dir):
         super().save_models(save_dir)
+        self.memory.save_replay_buffer(os.path.join(save_dir,'replay_buffer.pkl'))
         self.policy.save(os.path.join(save_dir, 'policy.pth'))
         self.online_critic.save(os.path.join(save_dir, 'online_critic.pth'))
         self.target_critic.save(os.path.join(save_dir, 'target_critic.pth'))
@@ -220,7 +223,7 @@ class SacdAgent(BaseAgent):
                     env, current_state, target_lane, ego.LENGTH, predict_info, surr_vehicle, horizon, dt)
             action_g = u_opt[0, :]
             if status == False:
-                reward_no_solution = -1
+                reward_no_solution = -10
                 no_solution_done = True
             action_g = u_opt[0, :]
             return action_g, reward_no_solution, no_solution_done
@@ -240,7 +243,7 @@ class SacdAgent(BaseAgent):
                     action_g[0] = u_opt[0, 0]
                     action_g[1] = u_opt[0, 1]
                     if status == False:
-                        reward_no_solution = -0.1
+                        reward_no_solution = -10
                         no_solution_done = True
                         print("Totally no Solution!!!")
                         action_g[0] = -5
@@ -424,7 +427,7 @@ class SacdAgent(BaseAgent):
                 threads = []
                 self.try_return_list.clear()
                 self.try_success_rate_list.clear()
-                num_of_eval = 24
+                num_of_eval = 40
                 num_of_thread = 8
                 num_of_eval_each_thread = int(
                     np.floor(num_of_eval/num_of_thread))
@@ -489,19 +492,25 @@ class SacdAgent(BaseAgent):
         plot_success_rate(success_rate_list,save=True)
 
     def evaluate_one_thread(self, try_num_thread,try_return_q,try_suc_rate_q,seed):
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        one_thread_env = gym.make("myenv",  render_mode='rgb_array')
-        init_speed = np.random.uniform(12,18)
-        mean = 0
-        std = 0.1
-        length = 300
-        speed_array = generate_speed_with_random_acc(init_speed,mean,std,length)
-        one_thread_env.set_ref_speed2(speed_array,10)
-        #one_thread_env.set_ref_speed("/home/i/sacd/data/constant_speed.txt")
-        # one_thread_env.set_ref_speed("/home/i/sacd/data/mountain_curve.txt")
-        # one_thread_env.set_ref_speed("/home/i/sacd/data/speeds.txt")
-        one_thread_env.configure(
+        try_num = 0
+        start_time = time.time()
+        num_steps = 0
+        num_episodes = 0
+        max_return = -10000
+        min_return = 10000
+        try_return_list = []
+        try_suc_rate_list = []
+        while try_num < try_num_thread:    
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            one_thread_env = gym.make("myenv",  render_mode='rgb_array')
+            init_speed = np.random.uniform(12,18)
+            mean = 0
+            std = 0.1
+            length = 300
+            speed_array = generate_speed_with_random_acc(init_speed,mean,std,length)
+            one_thread_env.set_ref_speed2(speed_array,10)
+            one_thread_env.configure(
             {
                 "simulation_frequency": 10,
                 "policy_frequency": 10,
@@ -512,23 +521,13 @@ class SacdAgent(BaseAgent):
                 "render_agent": False,
                 "offscreen_rendering": True
             })
-        one_thread_env.config['ego_spacing'] = 1.5
-        one_thread_env.config['initial_lane_id'] = np.random.choice([0, 1, 2])
-        #self.env.config['vehicle_density'] = np.random.uniform(1, 2)
-        one_thread_env.config['vehicle_density'] = 1.2
-        if (self.RENDER):
-            one_thread_env.config['offscreen_rendering'] = False
-        # print("Fuck")
-        try_num = 0
-        start_time = time.time()
-        num_steps = 0
-        num_episodes = 0
-        max_return = -10000
-        min_return = 10000
-        try_return_list = []
-        try_suc_rate_list = []
-        while try_num < try_num_thread:
+            one_thread_env.config['ego_spacing'] = 1.5
+            #self.env.config['vehicle_density'] = np.random.uniform(1, 2)
+            one_thread_env.config['vehicle_density'] = 1.2    
+            if (self.RENDER):
+                one_thread_env.config['offscreen_rendering'] = False
             try_num += 1
+            one_thread_env.config['initial_lane_id'] = np.random.choice([0, 1, 2])
             state = one_thread_env.reset(seed = seed)
             seed+=1
             state = state[0]

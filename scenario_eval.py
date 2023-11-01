@@ -19,9 +19,11 @@ def write_excel_xlsx(path, sheet_name, value):
             sheet.cell(row=i+1, column=j+1, value=str(value[i][j]))
     workbook.save(path)
 
+# 0: use rule-based 1: RL 2: mobile
+# if use mobile model, you need also change line 127 and line 131 in action.py
+behavior_flag = 2
 
-MPC_flag = False # use rule-based or RL
-scenario_num = 3
+scenario_num = 1
 seed = 1
 spd_segs = []
 s_t_segs = []
@@ -80,12 +82,13 @@ env.configure(
                 "ego_spacing":1.5
             })
 env.config['initial_lane_id'] = 1
+
 # load 模型
 log_dir = "/home/i/sacd/logs/myenv"
 sacdagent = SacdAgent(env,env,log_dir)
 sacdagent.RENDER = True
 #sacdagent.policy.load("/home/i/sacd/sacd/sacd_current_model/policy.pth")
-sacdagent.policy.load("/home/i/sacd/sacd_model/model_SACD_steps_8300.pth")
+sacdagent.policy.load("/home/i/sacd/sacd_model/model_SACD_steps_20500.pth")
 sacdagent.policy.eval()
 total_return = 0
 
@@ -132,17 +135,16 @@ for i in range(len(spd_segs)):
             env.render()
         spd_seg_track_v = np.append(spd_seg_track_v,env.vehicle.speed)
         spd_seg_track_s = np.append(spd_seg_track_s,env.vehicle.position[0]-env.start_position)
-        
-        if MPC_flag:
+        current_lane = np.clip(round(env.vehicle.position[1]/4),0,2)
+        if behavior_flag == 0:
             action_g,last_action_is_change,target_lane,change_flag,lane_change_count,no_solution_flag = MPC_des(env,last_action_is_change,count,target_lane,change_flag,lane_change_count,no_solution_flag,horizon = 10,dt = 0.4)
             if not isinstance(action_g,np.ndarray):
                 action_g = np.array([0,0])
-            current_lane = np.clip(round(env.vehicle.position[1]/4),0,2)
-        else:
+            
+        elif behavior_flag == 1:
             if count % round(env.config['policy_frequency']/policy_frequency) == 0:
                 speed_seq = normalize_speed(env.get_speed_seq(100))
                 action_d = sacdagent.exploit(state,speed_seq)
-                current_lane = np.clip(round(env.vehicle.position[1]/4),0,2)
                 if action_d !=1:
                     ## 标记下换道前的车道
                     old_lane = current_lane
@@ -158,6 +160,10 @@ for i in range(len(spd_segs)):
                     last_action_is_change = True
             action_g, reward_no_solution, no_solution_done = sacdagent.get_MPC_actions(
                 env,action_d, train=False, horizon=10, eval_MPC_protect=True,dt=0.4)
+        elif behavior_flag == 2:
+            env.vehicle.target_speed = env.get_ref_speed()[0]
+            action_g = None
+
         next_state, reward, done, truncate, info = env.step(action_g)
         if last_current_lane!=current_lane:
             lane_change_num+=1
@@ -165,7 +171,8 @@ for i in range(len(spd_segs)):
         if count % round(env.config['policy_frequency']/policy_frequency) == 0:
             episode_steps += 1
             episode_return += reward
-        if not MPC_flag:
+
+        if behavior_flag == 1:
             last_d = action_d
             next_state = np.array(next_state).reshape([state_dim])
             state = next_state
@@ -184,9 +191,9 @@ for i in range(len(spd_segs)):
     print("段终端延误为：",round(delay,2))
 
 env.close()
-if MPC_flag:
+if behavior_flag ==0:
     print("====使用的是Rule+MPC====")
-else:
+elif behavior_flag == 1:
     print("====使用的是RL====")
 print("总奖励为：", round(total_return,2))
 print("平均误差为：", round(total_error/total_stp,2))
@@ -196,9 +203,9 @@ print("换道次数为：",lane_change_num)
 book_name_xlsx = 'scenario_data.xlsx'
 sheet_name_xlsx = 'scenario_'+str(scenario_num)
 
-if MPC_flag:
+if behavior_flag == 0:
     sheet_name_xlsx = sheet_name_xlsx+'_Rule+MPC'
-else:
+elif behavior_flag == 1:
     sheet_name_xlsx = sheet_name_xlsx+'_RL'
 value = [["总奖励",str(round(total_return,2))],
                 ["平均误差",str(round(total_error/total_stp,2))],

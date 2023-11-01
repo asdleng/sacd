@@ -10,7 +10,14 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 import seaborn as sns
-
+def moving_ave(x):
+    res = []
+    for i in range(len(x)):
+        start_p = max(i-200,0)
+        end_p = i+1
+        mean = sum(x[start_p:end_p])/len(x[start_p:end_p])
+        res.append(mean)
+    return res
 # def plot_offline_rewards(collision_rate_list,num,save=False):
 #     plt.figure(1)
 #     plt.xlabel('Episode')
@@ -103,8 +110,17 @@ def smooth(data, sm=1):
 
 def main():
     # Initialize an empty 2D list
-    data = []
+    suc_list = []
+    with open("/home/i/sacd/sacd/sacd_current_model/eval_suc_rate.txt","r") as file:
+        for line in file:
+            suc = [int(x) for x in line.split()]
+            suc_list.append(suc)
+    suc_rate = []
+    for row in suc_list:
+        row_mean = sum(row) / len(row)
+        suc_rate.append(row_mean)
 
+    data = []
     # Open the text file for reading
     with open('/home/i/sacd/sacd/sacd_current_model/eval_data.txt', 'r') as file:
         # Iterate through each line in the file
@@ -114,23 +130,31 @@ def main():
             
             # Append the list of numbers to the 2D list
             data.append(numbers)
-
     means = []
     for row in data:
         row_mean = sum(row) / len(row)
         means.append(row_mean)
     #plot_offline_rewards(means)
     transposed_data = [[row[i] for row in data] for i in range(len(data[0]))]
-
-    y_data = smooth(transposed_data, 20)
-    x_data = (np.arange(len(y_data[0]))+1)*100
-    sns.set(style="darkgrid", font_scale=1.5)
-    color = ['r', 'g', 'b', 'k']
-    label = ['algo1', 'algo2', 'algo3', 'algo4']
-    linestyle = ['-', '--', ':', '-.']
-    sns.tsplot(time=x_data, data=y_data, color=color[2], linestyle=linestyle[0])
-    plt.savefig("smoothed_figure")
+    
+    means = means[0:-1]
+    means = moving_ave(means)
+    suc_rate = moving_ave(suc_rate)
+    x_data = np.arange(len(means))*100
+    plt.figure(1)
+    plt.plot(x_data,means,color='red')
     plt.show()
-    print("fuck")
+    plt.figure(2)
+    plt.plot(x_data,suc_rate,color='blue')
+    plt.show()
+    # y_data = smooth(transposed_data, 10)
+    # x_data = (np.arange(len(y_data[0]))+1)*100
+    # sns.set(style="darkgrid", font_scale=1.5)
+    # color = ['r', 'g', 'b', 'k']
+    # label = ['algo1', 'algo2', 'algo3', 'algo4']
+    # linestyle = ['-', '--', ':', '-.']
+    # sns.tsplot(time=x_data, data=y_data, color=color[2], linestyle=linestyle[0])
+    # plt.savefig("smoothed_figure")
+    # plt.show()
 if __name__=="__main__":
     main()

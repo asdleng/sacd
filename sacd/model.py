@@ -50,16 +50,20 @@ class DQNBase2(BaseNetwork):
         self.net = nn.Sequential(
             nn.Linear(input_dim, num_hidden_units),
             nn.ReLU(inplace=True),
+            nn.Linear(num_hidden_units, num_hidden_units),
+            nn.ReLU(inplace=True),
         ).apply(initialize_weights_he)
 
         self.speed_sequence_net = nn.Sequential(
-            nn.Conv1d(1,10, kernel_size=5),  # Adjust kernel size as needed
+            nn.Conv1d(1,10, kernel_size=10),  # Adjust kernel size as needed
+            nn.ReLU(inplace=True),
+            nn.Conv1d(10,10, kernel_size=10),  # Adjust kernel size as needed
             nn.ReLU(inplace=True),
             nn.MaxPool1d(10)
         ).apply(initialize_weights_he)
 
         self.final_net = nn.Sequential(
-            nn.Linear(num_hidden_units+90, num_hidden_units),  # Combine both inputs
+            nn.Linear(num_hidden_units+80, num_hidden_units),  # Combine both inputs
             nn.ReLU(inplace=True),
         ).apply(initialize_weights_he)
 
@@ -82,6 +86,8 @@ class QNetwork2(BaseNetwork):
 
         if not dueling_net:
             self.head = nn.Sequential(
+                nn.Linear(128, 128),
+                nn.ReLU(inplace=True),
                 nn.Linear(128, 128),
                 nn.ReLU(inplace=True),
                 nn.Linear(128, num_actions)).apply(initialize_weights_he)

@@ -1,6 +1,7 @@
 from collections import deque
 import numpy as np
 import torch
+import pickle
 
 
 class MultiStepBuff:
@@ -44,6 +45,7 @@ class MultiStepBuff:
 
     def __len__(self):
         return len(self.rewards)
+
 
 
 class LazyMemory(dict):
@@ -142,6 +144,17 @@ class LazyMultiStepMemory(LazyMemory):
         self.multi_step = int(multi_step)
         if self.multi_step != 1:
             self.buff = MultiStepBuff(maxlen=self.multi_step)
+            
+    def save_replay_buffer(self, filename):
+            # Serialize the entire memory (including states and sequences)
+        with open(filename, 'wb') as f:
+            pickle.dump(self, f)
+
+    def load_replay_buffer(cls, filename):
+        # Deserialize the memory from the file
+        with open(filename, 'rb') as f:
+            replay_buffer = pickle.load(f)
+        return replay_buffer
 
     def append(self, state, speed_seq1, action, reward, next_state, speed_seq2, done):
         if self.multi_step != 1:
