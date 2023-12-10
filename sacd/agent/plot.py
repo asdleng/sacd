@@ -130,6 +130,7 @@ def main():
             
             # Append the list of numbers to the 2D list
             data.append(numbers)
+    #data = data[0:300]
     means = []
     for row in data:
         row_mean = sum(row) / len(row)
@@ -137,17 +138,22 @@ def main():
     #plot_offline_rewards(means)
     transposed_data = [[row[i] for row in data] for i in range(len(data[0]))]
     
-    means = means[0:-1]
+    means = means[0:350]
+    suc_rate = suc_rate[0:350]
     means = moving_ave(means)
     suc_rate = moving_ave(suc_rate)
     x_data = np.arange(len(means))*100
     plt.figure(1)
     plt.plot(x_data,means,color='red')
+    plt.xlabel('Steps')
+    plt.ylabel('Average Mean Return')
     plt.show()
     plt.figure(2)
     plt.plot(x_data,suc_rate,color='blue')
+    plt.xlabel('Steps')
+    plt.ylabel('Success Rate')
     plt.show()
-    # y_data = smooth(transposed_data, 10)
+    # y_data = smooth(transposed_data, 12)
     # x_data = (np.arange(len(y_data[0]))+1)*100
     # sns.set(style="darkgrid", font_scale=1.5)
     # color = ['r', 'g', 'b', 'k']

@@ -5,6 +5,7 @@ from sacd.agent.mpc_new import MPC,MPC2,MPC3,MPC_des
 from sacd.agent.sacd import SacdAgent
 import gymnasium as gym
 from sacd.agent.energy_cost import energy_cost
+from sacd.agent.energy_cost_motor import energy_cost_motor
 from sacd.agent.speed_generator import normalize_speed
 
 def write_excel_xlsx(path, sheet_name, value):
@@ -21,13 +22,28 @@ def write_excel_xlsx(path, sheet_name, value):
 
 # 0: use rule-based 1: RL 2: mobile
 # if use mobile model, you need also change line 127 and line 131 in action.py
-behavior_flag = 2
-
+behavior_flag = 1
 scenario_num = 1
 seed = 1
 spd_segs = []
+
 s_t_segs = []
 s_t_segs_tracking = []
+# 3-stage or IDM ---- if use 'behavior_flag==3', then just ignore the IDM planned trajectory and always use the 3-stage one
+if behavior_flag == 3:
+    spd_file = "/home/i/sacd/ref_spd_data/idm_scenario"+str(scenario_num)+"/spd_seg_lin.txt"
+    target_t_file = "/home/i/sacd/ref_spd_data/idm_scenario"+str(scenario_num)+"/target_times.txt"
+else:
+    spd_file = "/home/i/sacd/ref_spd_data/scenario"+str(scenario_num)+"/spd_seg_lin.txt"
+    target_t_file = "/home/i/sacd/ref_spd_data/scenario"+str(scenario_num)+"/target_times.txt"
+target_times = np.loadtxt(target_t_file)
+
+with open(spd_file, "r") as file:
+    for line in file:
+        values = line.strip().split(",")
+        spd_seg = np.array([float(value) for value in values])
+        spd_segs.append(spd_seg)
+
 def cal_s_from_tv(v_tv):
     s_t = []
     s_t.append(0)
@@ -51,14 +67,7 @@ def convert_sv_to_tv(v_sv):
         cur_x = np.interp(t,t_array,np.arange(len(t_array)))
     return v_tv
 
-spd_file = "/home/i/sacd/ref_spd_data/scenario"+str(scenario_num)+"/spd_seg_lin.txt"
-with open(spd_file, "r") as file:
-    for line in file:
-        values = line.strip().split(",")
-        spd_seg = np.array([float(value) for value in values])
-        spd_segs.append(spd_seg)
-target_t_file = "/home/i/sacd/ref_spd_data/scenario"+str(scenario_num)+"/target_times.txt"
-target_times = np.loadtxt(target_t_file)
+
 
 RENDER = True
 
@@ -78,7 +87,7 @@ env.configure(
                 "render_agent": False,
                 "offscreen_rendering": False,
                 "initial_lane_id": 1,
-                "vehicles_density":1.2,
+                "vehicles_density":1.0,
                 "ego_spacing":1.5
             })
 env.config['initial_lane_id'] = 1
@@ -88,7 +97,7 @@ log_dir = "/home/i/sacd/logs/myenv"
 sacdagent = SacdAgent(env,env,log_dir)
 sacdagent.RENDER = True
 #sacdagent.policy.load("/home/i/sacd/sacd/sacd_current_model/policy.pth")
-sacdagent.policy.load("/home/i/sacd/sacd_model/model_SACD_steps_20500.pth")
+sacdagent.policy.load("/home/i/sacd/sacd_model/model_SACD_steps_26000.pth")
 sacdagent.policy.eval()
 total_return = 0
 
@@ -161,7 +170,10 @@ for i in range(len(spd_segs)):
             action_g, reward_no_solution, no_solution_done = sacdagent.get_MPC_actions(
                 env,action_d, train=False, horizon=10, eval_MPC_protect=True,dt=0.4)
         elif behavior_flag == 2:
-            env.vehicle.target_speed = env.get_ref_speed()[0]
+            dx = (env.get_t_x(env.time)-env.vehicle.position[0])
+            K = 1
+            tar_spd = env.get_ref_speed()[0]+dx*K
+            env.vehicle.target_speed = tar_spd
             action_g = None
 
         next_state, reward, done, truncate, info = env.step(action_g)
@@ -195,6 +207,8 @@ if behavior_flag ==0:
     print("====使用的是Rule+MPC====")
 elif behavior_flag == 1:
     print("====使用的是RL====")
+elif behavior_flag == 2:
+    print("====使用的是IDM+MOBIL====")
 print("总奖励为：", round(total_return,2))
 print("平均误差为：", round(total_error/total_stp,2))
 print("平均终端延误为：",round(total_delay/len(spd_segs),2))
@@ -223,7 +237,7 @@ for i in range(len(spd_segs)):
     s_t_segs.append(s_t)
     acc_seg = np.diff(spd_seg_vt)
     spd_seg_vt = spd_seg_vt[:-1]
-    energy_seg = energy_cost(spd_seg_vt,acc_seg)
+    energy_seg = energy_cost_motor(spd_seg_vt,acc_seg)
     total_energy_target+=energy_seg
 
     spd_seg_track = np.interp(np.arange(len(spd_segs[i])),spd_segs_track_s[i],spd_segs_track_v[i])
@@ -233,8 +247,9 @@ for i in range(len(spd_segs)):
     s_t_segs_tracking.append(s_t_track)
     acc_seg_track = np.diff(spd_seg_vt_track)
     spd_seg_vt_track = spd_seg_vt_track[:-1]
-    energy_seg_track = energy_cost(spd_seg_vt_track,acc_seg_track)
+    energy_seg_track = energy_cost_motor(spd_seg_vt_track,acc_seg_track)
     total_energy_track+=energy_seg_track
+
 print("Tracking能耗/Target能耗为：",total_energy_track,",",total_energy_target)
 sub_row = int(np.sqrt(len(spd_segs)))
 sub_col = int(np.sqrt(len(spd_segs))+1)
@@ -250,8 +265,12 @@ for i in range(sub_row):
             break
         axes[i,j].plot(spd_segs[k],color='red')
         axes[i,j].plot(spd_segs_track[k],color='blue')
+        axes[i, j].set_ylim(0, 20)
+        axes[i, j].set_ylabel('m/s')
+
         axes2[i,j].plot(s_t_segs[k],color='red')
         axes2[i,j].plot(s_t_segs_tracking[k],color='blue')
+        axes2[i, j].set_ylabel('m')
         k = k+1
 plt.tight_layout()
 plt.show()

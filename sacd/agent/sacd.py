@@ -282,8 +282,8 @@ class SacdAgent(BaseAgent):
         self.env.set_ref_speed2(speed_array,10)
         self.env.config['ego_spacing'] = 1.5
         self.env.config['initial_lane_id'] = np.random.choice([0, 1, 2])
-        #self.env.config['vehicle_density'] = np.random.uniform(1, 2)
-        self.env.config['vehicle_density'] = 1.2
+        self.env.config['vehicle_density'] = np.random.uniform(1, 1.5)
+        #self.env.config['vehicle_density'] = 1.2
         done, truncate = False, False
         state = self.env.reset()
         state = state[0]
@@ -427,7 +427,7 @@ class SacdAgent(BaseAgent):
                 threads = []
                 self.try_return_list.clear()
                 self.try_success_rate_list.clear()
-                num_of_eval = 40
+                num_of_eval = 80
                 num_of_thread = 8
                 num_of_eval_each_thread = int(
                     np.floor(num_of_eval/num_of_thread))
@@ -522,8 +522,8 @@ class SacdAgent(BaseAgent):
                 "offscreen_rendering": True
             })
             one_thread_env.config['ego_spacing'] = 1.5
-            #self.env.config['vehicle_density'] = np.random.uniform(1, 2)
-            one_thread_env.config['vehicle_density'] = 1.2    
+            self.env.config['vehicle_density'] = np.random.uniform(1, 1.5)
+            #one_thread_env.config['vehicle_density'] = 1.2    
             if (self.RENDER):
                 one_thread_env.config['offscreen_rendering'] = False
             try_num += 1
@@ -599,7 +599,8 @@ class SacdAgent(BaseAgent):
             mean = 0
             std = 0.1
             length = 300
-            self.env.config['vehicle_density'] = 1.2
+            self.env.config['vehicle_density'] = np.random.uniform(1.0,1.2)
+            #self.env.config['vehicle_density'] = 1.2
             speed_array = generate_speed_with_random_acc(init_speed,mean,std,length)
             self.env.set_ref_speed2(speed_array,10)
             state = self.env.reset(seed=self.seed)
