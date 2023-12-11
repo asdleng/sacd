@@ -1,4 +1,6 @@
 import os
+import sys
+import io
 import numpy as np
 import torch
 from torch.optim import Adam
@@ -10,6 +12,7 @@ from sacd.utils import disable_gradients
 from .mpc_new import MPC, MPC2, MPC3,  MPC_des
 from .plot import plot_rewards, plot_durations, plot_offline_rewards,plot_success_rate
 import time
+import random
 from .speed_generator import generate_speed_with_random_acc,normalize_speed
 
 class SacdAgent(BaseAgent):
@@ -19,27 +22,29 @@ class SacdAgent(BaseAgent):
                  target_entropy_ratio=0.95, start_steps=10,
                  update_interval=1, target_update_interval=1000,
                  use_per=False, dueling_net=False, num_eval_steps=1000,
-                 max_episode_steps=1000, log_interval=100, eval_interval=10000,
-                 cuda=True, seed=0):
+                 max_episode_steps=1000, log_interval=100, log_interval_ep=10,eval_interval=10000,
+                 cuda=True, seed=0,has_speed=True,method='dqn'):
         super().__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size, gamma,
             multi_step, target_entropy_ratio, start_steps, update_interval,
             target_update_interval, use_per, num_eval_steps, max_episode_steps,
-            log_interval, eval_interval, cuda, seed)
+            log_interval, log_interval_ep, eval_interval, cuda, seed,has_speed,method)
+        self.log_interval_ep = log_interval_ep
+        self.has_speed = has_speed
         self.seed = seed
+        self.method = method
         self.num_episodes = 20000
         self.RENDER = False
         self.state_dim = self.env.observation_space.shape[0] * \
             self.env.observation_space.shape[1]
         self.act_dim = 3
+        self.epsilon = 1.0
 
-        self.continue_train = True
-        self.continue_eval = True
+        self.continue_train = False
+        self.continue_eval = False
+        self.has_speed = True
         # 注意，这里是为了避免频繁换道
         self.policy_frequency = 1
-        # self.env.set_ref_speed("/home/i/sacd/data/constant_speed.txt")
-        # self.env.set_ref_speed("/home/i/sacd/data/mountain_curve.txt")
-        # self.env.set_ref_speed("/home/i/sacd/data/speeds.txt")
         self.env.configure(
             {
                 "simulation_frequency": 10,
@@ -54,8 +59,6 @@ class SacdAgent(BaseAgent):
         if (self.RENDER):
             self.env.config['offscreen_rendering'] = False
 
-        
-
         self.try_return_list = []
         self.try_success_rate_list = []
         #
@@ -63,14 +66,13 @@ class SacdAgent(BaseAgent):
         self.episode_durations = []
         # Define networks.
         self.policy = CateoricalPolicy2(
-            self.state_dim, self.act_dim
-        ).to(self.device)
+            self.state_dim, self.act_dim,has_speed = self.has_speed).to(self.device)
         self.online_critic = TwinnedQNetwork2(
             self.state_dim, self.act_dim,
-            dueling_net=dueling_net).to(device=self.device)
+            dueling_net=dueling_net,has_speed = self.has_speed).to(device=self.device)
         self.target_critic = TwinnedQNetwork2(
             self.state_dim, self.act_dim,
-            dueling_net=dueling_net).to(device=self.device).eval()
+            dueling_net=dueling_net,has_speed = self.has_speed).to(device=self.device).eval()
 
         # Copy parameters of the learning network to the target network.
         self.target_critic.load_state_dict(self.online_critic.state_dict())
@@ -107,6 +109,23 @@ class SacdAgent(BaseAgent):
             action = self.policy.act(state,speed_seq)
         return action.item()
 
+    def dqn_explore(self, state, speed_seq):
+        state = torch.tensor(state[None, ...]).to(self.device).float()
+        speed_seq = torch.tensor(speed_seq[None, ...]).to(self.device).float()
+        self.update_eps();
+        if random.random() < self.epsilon:
+            # Explore: Choose a random action
+            action = torch.tensor([[random.randint(0, self.act_dim - 1)]], device=self.device)
+        else:
+            # Exploit: Choose the action with the highest Q-value
+            with torch.no_grad():
+                q1,q2 = self.online_critic(state, speed_seq) # 出来的是每个动作的Q值
+                action = torch.argmax(torch.min(q1, q2), dim=1, keepdim=True)
+        return action.item()
+
+    def update_eps(self):
+        self.epsilon = max(0.01, 1.0 * (0.995 ** self.episodes))
+
     def update_target(self):
         self.target_critic.load_state_dict(self.online_critic.state_dict())
 
@@ -120,9 +139,12 @@ class SacdAgent(BaseAgent):
         with torch.no_grad():
             _, action_probs, log_action_probs = self.policy.sample(next_states,speed_seq2)
             next_q1, next_q2 = self.target_critic(next_states,speed_seq2)
-            next_q = (action_probs * (
-                torch.min(next_q1, next_q2) - self.alpha * log_action_probs
-            )).sum(dim=1, keepdim=True)
+            if self.method=='sacd':
+                next_q = (action_probs * (
+                    torch.min(next_q1, next_q2) - self.alpha * log_action_probs
+                    )).sum(dim=1, keepdim=True)
+            elif self.method=='dqn':
+                next_q = torch.max(torch.min(next_q1, next_q2),1,keepdim=True)[0]
 
         assert rewards.shape == next_q.shape
         return rewards + (1.0 - dones) * self.gamma_n * next_q
@@ -187,6 +209,7 @@ class SacdAgent(BaseAgent):
         with open(load_dir+"current_states.txt", "r") as file:
             self.episodes = int(file.readline().strip())
             self.steps = int(file.readline().strip())
+
     def save_models(self, save_dir):
         super().save_models(save_dir)
         self.memory.save_replay_buffer(os.path.join(save_dir,'replay_buffer.pkl'))
@@ -300,15 +323,20 @@ class SacdAgent(BaseAgent):
             current_lane = np.clip(round(self.env.vehicle.position[1]/4), 0, 2)
             if count % round(self.env.config['policy_frequency']/self.policy_frequency) == 0:
                 # 这里才会真正做决策！！！！
-                action_d = self.explore(state,speed_seq)
+                if self.method == 'sacd':
+                    action_d = self.explore(state,speed_seq)
+                elif self.method == 'dqn':
+                    action_d = self.dqn_explore(state,speed_seq)
                 if count==0:
                     old_state = state
                     old_speed_seq =  normalize_speed(self.env.get_speed_seq(100))
                     old_action = action_d
             else:
+                # 否则执行既有决策！！！！
                 action_d = last_d
             action_g, reward_no_solution, no_solution_done = self.get_MPC_actions(self.env,
-                action_d, train=True,horizon = 10,dt=0.4)
+                action_d, train=True, horizon = 10, dt=0.4)
+
             next_state, reward, done, truncate, info = self.env.step(action_g)
 
             if (self.RENDER == True):
@@ -346,31 +374,24 @@ class SacdAgent(BaseAgent):
                 self.update_target()
 
             count += 1
-            # if self.steps % self.eval_interval == 0:
-            #     self.evaluate(1)
-            # self.save_models(os.path.join(self.model_dir, 'final'))
-            if self.steps % self.log_interval == 0:
-                filename = f"sacd_model/model_SACD_steps_{self.steps}.pth"
+            # 使用step数存模型
+            if self.steps % self.log_interval == 0:    
+                filename = f"{self.method}_model/model_{self.method.upper()}_steps_{self.steps}.pth"
                 torch.save(self.policy.state_dict(), filename)
-                current_save_path = "/home/i/sacd/sacd/sacd_current_model/"
+                current_save_path = "/home/i/sacd/sacd/{self.method}_current_model/"
                 self.save_models(current_save_path)
         # We log running mean of training rewards.
         self.train_return.append(episode_return)
         self.episode_rewards.append(episode_return)
-        self.episode_durations.append(
-            episode_steps/self.env.config['policy_frequency'])
-
-        
-            # self.writer.add_scalar(
-            #     'reward/train', self.train_return.get(), self.steps)
+        self.episode_durations.append(episode_steps/self.env.config['policy_frequency'])
+        # 使用episode数存模型
+        # if self.episodes % self.log_interval_ep == 0:  
+        #     filename = f"{self.method}_model/model_{self.method.upper()}_episodes_{self.episodes}.pth"
+        #     torch.save(self.policy.state_dict(), filename)
 
         print(f'Episode: {self.episodes:<4}  '
               f'Steps: {self.steps:<4}  '
               f'Return: {episode_return:<5.2f}')
-    # def lift_action(action):
-    #     action[0] = (action[0]-(-1))/2*10+(-5)
-    #     # action[1] = (action[1]-(-np.pi/4))/2*np.pi/2+(-np.pi/4)
-    #     return action
 
     def run(self):
         while True:
@@ -380,7 +401,7 @@ class SacdAgent(BaseAgent):
             if self.steps > self.num_steps:
                 break
         # save the policy
-        torch.save(self.policy.state_dict(), 'sacd.pth')
+        #torch.save(self.policy.state_dict(), 'sacd.pth')
 
 
     def offline_eval(self):
@@ -391,7 +412,7 @@ class SacdAgent(BaseAgent):
         max_return_list = []
         j = 0
         if self.continue_eval:
-            file_path = "/home/i/sacd/sacd/sacd_current_model/eval_data.txt"
+            file_path = f"/home/i/sacd/sacd/{self.method}_current_model/eval_data.txt"
             with open(file_path, 'r') as file:
                 # Iterate through each line in the file
                 for line in file:
@@ -402,7 +423,7 @@ class SacdAgent(BaseAgent):
                     min_return_list.append(min(numbers))
                     j = j+1
                     # Append the list of numbers to the 2D list
-            file_path = "/home/i/sacd/sacd/sacd_current_model/eval_suc_rate.txt"
+            file_path = f"/home/i/sacd/sacd/{self.method}_current_model/eval_suc_rate.txt"
             with open(file_path, 'r') as file:
                 # Iterate through each line in the file
                 for line in file:
@@ -412,13 +433,13 @@ class SacdAgent(BaseAgent):
                     # Append the list of numbers to the 2D list
         else:
             # 清空文件
-            with open("/home/i/sacd/sacd/sacd_current_model/eval_data.txt", 'w'):
+            with open(f"/home/i/sacd/sacd/{self.method}_current_model/eval_data.txt", 'w'):
                 pass
-            with open("/home/i/sacd/sacd/sacd_current_model/eval_suc_rate.txt", 'w'):
+            with open(f"/home/i/sacd/sacd/{self.method}_current_model/eval_suc_rate.txt", 'w'):
                 pass
         while j <= 2000:
             num = str(j)
-            file_path = "/home/i/sacd/sacd_model/model_SACD_steps_"+num+"00.pth"
+            file_path = f"/home/i/sacd/{self.method}_model/model_{self.method.upper()}_steps_"+num+"00.pth"
             try:
                 if j > 0:
                     self.policy.load(file_path)
@@ -427,7 +448,7 @@ class SacdAgent(BaseAgent):
                 threads = []
                 self.try_return_list.clear()
                 self.try_success_rate_list.clear()
-                num_of_eval = 80
+                num_of_eval = 40
                 num_of_thread = 8
                 num_of_eval_each_thread = int(
                     np.floor(num_of_eval/num_of_thread))
@@ -463,10 +484,11 @@ class SacdAgent(BaseAgent):
                 max_return = max(self.try_return_list)
                 min_return = min(self.try_return_list)
                 std_return = np.std(self.try_return_list)/np.sqrt(len(self.try_return_list))
-                with open('/home/i/sacd/sacd/sacd_current_model/eval_data.txt', 'a') as file:
+                with open(f'/home/i/sacd/sacd/{self.method}_current_model/eval_data.txt', 'a') as file:
                     file.write(' '.join(map(str, self.try_return_list)) + '\n')
-                with open('/home/i/sacd/sacd/sacd_current_model/eval_suc_rate.txt', 'a') as file:
+                with open(f'/home/i/sacd/sacd/{self.method}_current_model/eval_suc_rate.txt', 'a') as file:
                     file.write(' '.join(map(str, self.try_success_rate_list)) + '\n')
+                sys.stdout = io.StringIO()
                 print("最大Return为：", max_return)
                 print("平均Return为：", mean_return)
                 print("最小Return为：", min_return)
@@ -492,6 +514,7 @@ class SacdAgent(BaseAgent):
         plot_success_rate(success_rate_list,save=True)
 
     def evaluate_one_thread(self, try_num_thread,try_return_q,try_suc_rate_q,seed):
+        sys.stdout = io.StringIO()
         try_num = 0
         start_time = time.time()
         num_steps = 0

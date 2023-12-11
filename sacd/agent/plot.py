@@ -37,6 +37,7 @@ def plot_success_rate(success_rate,figure_num2=2,save=False):
     plt.ylabel('Success Rate')
     X = (np.arange(len(success_rate)))*100
     plt.plot(X,success_rate,color='blue')
+    plt.get_current_fig_manager().window.attributes('-topmost', 0)
     plt.pause(0.001)  # pause a bit so that plots are updated
     if save:
         plt.savefig('success_rate')
@@ -48,6 +49,8 @@ def plot_offline_rewards(mean_return_list,max_return_list=[],min_return_list=[],
     X = (np.arange(len(mean_return_list)))*100
     #plt.plot(X,min_return_list,color='blue')
     plt.plot(X,mean_return_list,color='blue')
+    plt.get_current_fig_manager().window.attributes('-topmost', 0)
+
     #plt.errorbar(X, mean_return_list, yerr=std_return_list, fmt='o-', capsize=5)
 
     #plt.plot(X,max_return_list,color='blue')
@@ -71,6 +74,8 @@ def plot_rewards(episode_rewards,show_result=False):
     plt.xlabel('Episode')
     plt.ylabel('Rewards')
     plt.plot(rewards_t.numpy(),color='red')
+    plt.get_current_fig_manager().window.attributes('-topmost', 0)
+
     if len(rewards_t) >= 100:
         means = rewards_t.unfold(0, 100, 1).mean(1).view(-1).to(dtype)
         means = torch.cat((rewards_t[0:99].to(dtype), means))

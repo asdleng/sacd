@@ -4,7 +4,7 @@ import argparse
 from datetime import datetime
 
 import gymnasium as gym
-from sacd.agent import SacdAgent, SharedSacdAgent
+from sacd.agent import SacdAgent
 
 
 def evaluate(args):

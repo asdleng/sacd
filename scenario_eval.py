@@ -20,7 +20,7 @@ def write_excel_xlsx(path, sheet_name, value):
             sheet.cell(row=i+1, column=j+1, value=str(value[i][j]))
     workbook.save(path)
 
-# 0: use rule-based 1: RL 2: mobile
+# 0: use rule-based 1: DRL+MPC 2: MOBIL+IDM
 # if use mobile model, you need also change line 127 and line 131 in action.py
 behavior_flag = 1
 scenario_num = 1
@@ -29,7 +29,8 @@ spd_segs = []
 
 s_t_segs = []
 s_t_segs_tracking = []
-# 3-stage or IDM ---- if use 'behavior_flag==3', then just ignore the IDM planned trajectory and always use the 3-stage one
+vehicle_density = 1.0
+# 3-stage or IDM ---- if use 'behavior_flag==3', then just ignore the M-IDM planned trajectory and always use the 3-stage one
 if behavior_flag == 3:
     spd_file = "/home/i/sacd/ref_spd_data/idm_scenario"+str(scenario_num)+"/spd_seg_lin.txt"
     target_t_file = "/home/i/sacd/ref_spd_data/idm_scenario"+str(scenario_num)+"/target_times.txt"
@@ -87,7 +88,7 @@ env.configure(
                 "render_agent": False,
                 "offscreen_rendering": False,
                 "initial_lane_id": 1,
-                "vehicles_density":1.0,
+                "vehicles_density": vehicle_density,
                 "ego_spacing":1.5
             })
 env.config['initial_lane_id'] = 1
@@ -97,7 +98,7 @@ log_dir = "/home/i/sacd/logs/myenv"
 sacdagent = SacdAgent(env,env,log_dir)
 sacdagent.RENDER = True
 #sacdagent.policy.load("/home/i/sacd/sacd/sacd_current_model/policy.pth")
-sacdagent.policy.load("/home/i/sacd/sacd_model/model_SACD_steps_26000.pth")
+sacdagent.policy.load("/home/i/sacd/scenario_eval.pth")
 sacdagent.policy.eval()
 total_return = 0
 
@@ -145,12 +146,12 @@ for i in range(len(spd_segs)):
         spd_seg_track_v = np.append(spd_seg_track_v,env.vehicle.speed)
         spd_seg_track_s = np.append(spd_seg_track_s,env.vehicle.position[0]-env.start_position)
         current_lane = np.clip(round(env.vehicle.position[1]/4),0,2)
-        if behavior_flag == 0:
+        if behavior_flag == 0:  # Rule
             action_g,last_action_is_change,target_lane,change_flag,lane_change_count,no_solution_flag = MPC_des(env,last_action_is_change,count,target_lane,change_flag,lane_change_count,no_solution_flag,horizon = 10,dt = 0.4)
             if not isinstance(action_g,np.ndarray):
                 action_g = np.array([0,0])
             
-        elif behavior_flag == 1:
+        elif behavior_flag == 1: # DRL+MPC
             if count % round(env.config['policy_frequency']/policy_frequency) == 0:
                 speed_seq = normalize_speed(env.get_speed_seq(100))
                 action_d = sacdagent.exploit(state,speed_seq)
@@ -209,6 +210,8 @@ elif behavior_flag == 1:
     print("====使用的是RL====")
 elif behavior_flag == 2:
     print("====使用的是IDM+MOBIL====")
+elif behavior_flag == 3:
+    print("====使用的是DRL+IDM====")
 print("总奖励为：", round(total_return,2))
 print("平均误差为：", round(total_error/total_stp,2))
 print("平均终端延误为：",round(total_delay/len(spd_segs),2))
