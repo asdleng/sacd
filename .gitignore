@@ -5,3 +5,4 @@ __pycache__/
 *.out
 sacd_model/
 1006/
+dqn_model/
