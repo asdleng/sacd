@@ -1,0 +1,15 @@
+.vscode/
+logs/
+__pycache__/
+*.log
+*.out
+sacd_model/
+sacd_lstm_model/
+sacd_no_spd_model/
+1006/
+dqn_model/
+dqn_lstm_model/
+images/
+scenario_eval_traj/
+*.pkl
+*.pth
