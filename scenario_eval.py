@@ -33,11 +33,16 @@ def write_excel_xlsx(path, sheet_name, value):
 # 0: use rule-based 1: DRL+MPC 2: MOBIL+IDM 3: Only Car-following MPC
 # if use MOBIL+IDM model, you need also discommit line 127 and line 131 in action.py
 
-# IMPORTANT!!!!
-# DON'T FORGET TO DISCOMMENT LINE 228 in my_env.py and LINE 229: 'b_v_number-1', it should restore for training
+# IMPORTANT!!!! # IMPORTANT!!!! # IMPORTANT!!!!
 
-behavior_flag = 3
-scenario_num = 6
+# DON'T FORGET TO DISCOMMENT LINE 228 in my_env.py and LINE 229: 'b_v_number-1', it should only restore for training
+# Change the input of the LSTM model:
+# LINE 51: input_size=1,
+# LINE 75: speed_sequence = speed_sequence.view(speed_sequence.size(0), speed_sequence.size(1), 1)
+
+MPC_protect = True
+behavior_flag = 1
+scenario_num = 1
 sur_spd = 10
 seed = 1
 spd_segs = []
@@ -47,7 +52,7 @@ DRL_times = []
 MPC_times = []
 s_t_segs = []
 s_t_segs_tracking = []
-vehicle_density = 1.4
+vehicle_density = 1.0
 upper = 20
 lower = 0
 # 3-stage or IDM ---- if use 'behavior_flag==4', then just ignore the M-IDM planned trajectory and always use the 3-stage one
@@ -120,16 +125,17 @@ sacdagent.RENDER = True
 #sacdagent.policy.load("/home/i/sacd/sacd/sacd_current_model/policy.pth")# 注意lower = 10
 #sacdagent.policy.load("/home/i/sacd/scenario_eval.pth") # 注意lower = 8
 #sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm2.pth") # 注意lower = 10
+#sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm4.pth") # 注意lower = 0
+#sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm5.pth") # 注意lower = 0
 sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm4.pth") # 注意lower = 0
 sacdagent.policy.eval()
 total_return = 0
-
+collision = 0
 total_error = 0
 total_stp = 0
 total_delay = 0
 
 # MPC_des
-
 lane_change_num = 0
 spd_segs_track = []
 spd_segs_track_v = []
@@ -221,7 +227,7 @@ for i in range(len(spd_segs)):
                 if action_d != 1:
                     last_action_is_change = True
             action_g, reward_no_solution, no_solution_done,delta_t,cert = sacdagent.get_MPC_actions(
-                env,action_d, train=False, horizon=10, eval_MPC_protect=True,dt=0.4)
+                env,action_d, train=False, horizon=10, eval_MPC_protect=MPC_protect,dt=0.4)
             MPC_times.append(delta_t)
             if cert and not cert_flag:
                 cert_num+=1
@@ -251,6 +257,8 @@ for i in range(len(spd_segs)):
         error = abs(info['speed']-env.get_ref_speed()[0])
         eposide_error += error
         count += 1
+        if done:
+            collision+=1
     spd_segs_track_v.append(spd_seg_track_v)
     spd_segs_track_s.append(spd_seg_track_s)
     spd_segs_track_y.append(spd_seg_track_y)
@@ -275,6 +283,7 @@ elif behavior_flag == 2:
 elif behavior_flag == 3:
     print("====使用的是Car-following MPC====")
 print("总奖励为：", round(total_return,2))
+print("总碰撞次数为：", collision)
 print("平均误差为：", round(total_error/total_stp,2))
 print("平均终端延误为：",round(total_delay/len(spd_segs),2))
 print("换道次数为：",lane_change_num)
