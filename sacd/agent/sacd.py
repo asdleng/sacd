@@ -23,7 +23,7 @@ class SacdAgent(BaseAgent):
                  target_entropy_ratio=0.90, start_steps=101,
                  update_interval=4, target_update_interval=1000,
                  use_per=False, dueling_net=False, num_eval_steps=1000,
-                 max_episode_steps=1000, log_interval=100, log_interval_ep=10,eval_interval=10000,
+                 max_episode_steps=1000, log_interval=100, log_interval_ep=1,eval_interval=10000,
                  cuda=True, seed=0, has_speed=True, spd_type = 'lstm', method='dqn'):
         super().__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size, gamma,
@@ -45,7 +45,7 @@ class SacdAgent(BaseAgent):
         self.upper = 20
         self.lower = 0
         self.continue_train = False
-        self.continue_eval = True
+        self.continue_eval = False
         # 注意，这里是为了避免频繁换道
         self.policy_frequency = 1
         self.env.configure(
@@ -53,11 +53,12 @@ class SacdAgent(BaseAgent):
                 "simulation_frequency": 10,
                 "policy_frequency": 10,
                 "duration": 500,
-                "screen_width": 500,
+                "screen_width": 1000,
                 "screen_height": 200,
                 "show_trajectories": False,
                 "render_agent": False,
-                "offscreen_rendering": True
+                "offscreen_rendering": True,
+                'ego_spacing': 1.5
             })
         if (self.RENDER):
             self.env.config['offscreen_rendering'] = False
@@ -104,6 +105,9 @@ class SacdAgent(BaseAgent):
         state = state.reshape([self.state_dim])
         state[1] = (env.vehicle.position[0]-env.start_position)/env.trip_dis
         state[0] = env.time/env.x_time[-1]
+        return state
+    def make_state0(self,env,state):
+        state = state.reshape([self.state_dim])
         return state
     def explore(self, state,speed_seq):
         # Act with randomness.
@@ -330,12 +334,23 @@ class SacdAgent(BaseAgent):
         # length = 300
         speed_array = random_select_spd(self.spd_sv,300)
         self.env.set_ref_speed2(speed_array,10)
-        self.env.config['ego_spacing'] = 2.0
-        self.env.config['initial_lane_id'] = np.random.choice([0, 1, 2])
-        self.env.config['vehicle_density'] = self.ger_uniform_num(1.0, 1.4)
-        #self.env.config['vehicle_density'] = 1.2
+        self.env.configure(
+            {
+                "simulation_frequency": 10,
+                "policy_frequency": 10,
+                "duration": 500,
+                "screen_width": 1000,
+                "screen_height": 200,
+                "show_trajectories": False,
+                "render_agent": True,
+                "offscreen_rendering": False,
+                "initial_lane_id": np.random.choice([0, 1, 2]),
+                "vehicles_density": self.ger_uniform_num(1.0, 1.4),
+                "ego_spacing":1.5
+            })
         done, truncate = False, False
         state = self.env.reset()
+        #state = self.make_state0(self.env,state[0])
         state = self.make_state(self.env,state[0])
         eco_seq = self.env.get_eco_seq()
         last_d = 1
@@ -347,16 +362,20 @@ class SacdAgent(BaseAgent):
 
         while (not done and not truncate) and episode_steps <= self.max_episode_steps:
             current_lane = np.clip(round(self.env.vehicle.position[1]/4), 0, 2)
+            spd_seq = normalize_speed(self.env.get_speed_seq(100),self.upper,self.lower)
             if count % round(self.env.config['policy_frequency']/self.policy_frequency) == 0:
                 step_reward  = 0
                 # 这里才会真正做决策！！！！
                 if self.method == 'sacd' or self.method == 'ac':
                     action_d = self.explore(state,eco_seq)
+                    #action_d = self.explore(state,spd_seq)
                 elif self.method == 'dqn':
                     action_d = self.dqn_explore(state,eco_seq)
+                    #action_d = self.dqn_explore(state,spd_seq)
                 if count==0:
                     old_state = state
                     old_eco_seq =  self.env.get_eco_seq()
+                    #old_spd_seq =  normalize_speed(self.env.get_speed_seq(100),self.upper,self.lower)
                     old_action = action_d
             else:
                 # 否则执行既有决策！！！！
@@ -374,8 +393,10 @@ class SacdAgent(BaseAgent):
             step_reward += reward
             done  = done or no_solution_done    # 无解，也是done
 
+            #next_state = self.make_state0(self.env,np.array(next_state))
             next_state = self.make_state(self.env,np.array(next_state))
             next_eco_seq =  self.env.get_eco_seq()
+            #next_spd_seq = normalize_speed(self.env.get_speed_seq(100),self.upper,self.lower)
             # Clip reward to [-1.0, 1.0].
             # clipped_reward = max(min(reward, 1.0), -1.0)
             state = next_state
@@ -383,9 +404,12 @@ class SacdAgent(BaseAgent):
             if count>0 or done or truncate :
                 if count % round(self.env.config['policy_frequency']/self.policy_frequency) == 0 or done or truncate:
                     self.memory.append(old_state,old_eco_seq, old_action, step_reward,
-                                    next_state, next_eco_seq, (done or truncate))
+                                     next_state, next_eco_seq, (done or truncate))
+                    #self.memory.append(old_state,old_spd_seq, old_action, step_reward,
+                    #                next_state, next_spd_seq, (done or truncate))
                     old_state = next_state
                     old_eco_seq = next_eco_seq
+                    #old_spd_seq = next_spd_seq
                     old_action = action_d
                     self.steps += 1
                     episode_steps += 1
@@ -418,25 +442,41 @@ class SacdAgent(BaseAgent):
                 elif self.has_speed==False:
                     current_save_path = f"/home/i/sacd/sacd/{self.method}_no_spd_current_model/"
                 self.save_models(current_save_path)
+                
         # We log running mean of training rewards.
         self.train_return.append(episode_return)
         self.episode_rewards.append(episode_return)
         self.episode_durations.append(episode_steps/self.env.config['policy_frequency'])
         # 使用episode数存模型
-        # if self.episodes % self.log_interval_ep == 0:  
+        # if self.episodes % self.log_interval_ep == 0 and self.steps>0:    
         #     filename = f"{self.method}_model/model_{self.method.upper()}_episodes_{self.episodes}.pth"
-        #     torch.save(self.policy.state_dict(), filename)
+        #     if self.spd_type=='lstm':
+        #         filename = f"{self.method}_lstm_model/model_{self.method.upper()}_episodes_{self.episodes}.pth"
+        #     if self.has_speed==False:
+        #         filename = f"{self.method}_no_spd_model/model_{self.method.upper()}_episodes_{self.episodes}.pth"
+        #     if self.method!='dqn':  #SAC使用的是\pi网络
+        #         torch.save(self.policy.state_dict(), filename)
+        #     else:   # DQN使用的是Q网络
+        #         torch.save(self.online_critic.state_dict(), filename)
+        #     current_save_path = f"/home/i/sacd/sacd/{self.method}_current_model/"
+        #     if self.spd_type=='lstm':
+        #         current_save_path = f"/home/i/sacd/sacd/{self.method}_lstm_current_model/"
+        #     if self.has_speed==False:
+        #         current_save_path = f"/home/i/sacd/sacd/{self.method}_no_spd_current_model/"
+        #     self.save_models(current_save_path)
 
         print(f'Episode: {self.episodes:<4}  '
               f'Steps: {self.steps:<4}  '
               f'Return: {episode_return:<5.2f}')
 
     def run(self):
+        if (self.RENDER):
+            self.env.config['offscreen_rendering'] = False
         if self.continue_train:
             load_path = f"/home/i/sacd/sacd/{self.method}_current_model/"
             if self.spd_type=='lstm':
                 load_path = f"/home/i/sacd/sacd/{self.method}_lstm_current_model/"
-            elif self.has_speed==False:
+            if self.has_speed==False:
                 load_path = f"/home/i/sacd/sacd/{self.method}_no_spd_current_model/"
             self.load_models(load_path)
         else:
@@ -444,7 +484,7 @@ class SacdAgent(BaseAgent):
             model_path = f"/home/i/sacd/{self.method}_model/"
             if self.spd_type=='lstm':
                 model_path = f"/home/i/sacd/{self.method}_lstm_model/"
-            elif self.has_speed==False:
+            if self.has_speed==False:
                 model_path = f"/home/i/sacd/{self.method}_no_spd_model/"
             remove_files_in_directory(model_path)
         while True:
@@ -468,7 +508,7 @@ class SacdAgent(BaseAgent):
         root_path = f"/home/i/sacd/sacd/{self.method}_current_model/"
         if self.spd_type=='lstm':
             root_path = f"/home/i/sacd/sacd/{self.method}_lstm_current_model/"
-        elif self.has_speed==False:
+        if self.has_speed==False:
             root_path = f"/home/i/sacd/sacd/{self.method}_no_spd_current_model/"
         if self.continue_eval:
             file_path = root_path+"eval_data.txt"
@@ -511,7 +551,7 @@ class SacdAgent(BaseAgent):
             file_path = f"/home/i/sacd/{self.method}_model/model_{self.method.upper()}_steps_"+num+"00.pth"
             if self.spd_type=='lstm':
                 file_path = f"/home/i/sacd/{self.method}_lstm_model/model_{self.method.upper()}_steps_"+num+"00.pth"
-            elif self.has_speed==False:
+            if self.has_speed==False:
                 file_path = f"/home/i/sacd/{self.method}_no_spd_model/model_{self.method.upper()}_steps_"+num+"00.pth"
             try:
                 if j > 0:
@@ -521,9 +561,9 @@ class SacdAgent(BaseAgent):
                     else:   # dqn 使用的是Q网络
                         self.online_critic.load(file_path)
                         self.online_critic.eval()
-                print("======Evaluating", j*100, "th step model======")
+                print("======Evaluating", j*100, "th steps model======")
                 self.steps = j*100
-                self.episodes = int(self.steps/10)
+                #self.episodes = j*10
                 threads = []
                 self.try_return_list.clear()
                 self.try_success_rate_list.clear()
@@ -597,7 +637,7 @@ class SacdAgent(BaseAgent):
                 time.sleep(0.1)
                 j = j+1
             except Exception:
-                print("Waiting for the ", j*100, "th step pth")
+                print("Waiting for the ", j*100, "th steps pth")
                 time.sleep(5)
 
 
@@ -620,7 +660,6 @@ class SacdAgent(BaseAgent):
         while try_num < try_num_thread:    
             torch.manual_seed(seed)
             one_thread_env = gym.make("myenv",  render_mode='rgb_array')
-            np.random.seed(seed)
             #init_speed = self.ger_uniform_num(self.lower,self.lower+4)
             # mean = 0
             # std = 0.1
@@ -628,28 +667,27 @@ class SacdAgent(BaseAgent):
             np.random.seed(seed)
             speed_array = random_select_spd(self.spd_sv,300)
             one_thread_env.set_ref_speed2(speed_array,10)
+            np.random.seed(seed)
             one_thread_env.configure(
             {
                 "simulation_frequency": 10,
                 "policy_frequency": 10,
                 "duration": 500,
-                "screen_width": 500,
+                "screen_width": 1000,
                 "screen_height": 200,
                 "show_trajectories": False,
-                "render_agent": False,
-                "offscreen_rendering": True,
-                "ego_spacing":2.0
+                "render_agent": True,
+                "offscreen_rendering": False,
+                "initial_lane_id": np.random.choice([0, 1, 2]),
+                "vehicles_density": self.ger_uniform_num(1.0, 1.4),
+                "ego_spacing":1.5
             })
-            np.random.seed(seed)
-            self.env.config['vehicle_density'] = self.ger_uniform_num(1.0, 1.4)
-            #one_thread_env.config['vehicle_density'] = 1.2    
             if (self.RENDER):
                 one_thread_env.config['offscreen_rendering'] = False
             try_num += 1
-            np.random.seed(seed)
-            one_thread_env.config['initial_lane_id'] = np.random.choice([0, 1, 2])
             state = one_thread_env.reset(seed = seed)
             seed+=1
+            #state = self.make_state0(one_thread_env,state[0])
             state = self.make_state(one_thread_env,state[0])
             episode_steps = 0
             episode_return = 0.0
@@ -666,25 +704,27 @@ class SacdAgent(BaseAgent):
                     one_thread_env.render()
                 if count % round(one_thread_env.config['policy_frequency']/self.policy_frequency) == 0:
                     eco_seq = one_thread_env.get_eco_seq()
+                    #spd_seq = normalize_speed(one_thread_env.get_speed_seq(100),self.upper,self.lower)
                     if self.method=='sacd' or self.method=='ac':
                         action_d = self.exploit(state,eco_seq)
+                        #action_d = self.exploit(state,spd_seq)
                     elif self.method=='dqn':
-                        np.random.seed()
+                        #np.random.seed()
                         action_d = self.dqn_exploit(state,eco_seq)
-                        np.random.seed(seed)
-                    # 换道完成，强制直行
-                current_lane = np.clip(
-                    round(one_thread_env.vehicle.position[1]/4), 0, 2)
-                if current_lane>0 and action_d == 0:
-                    lc+=1
-                elif current_lane<2 and action_d == 2:
-                    lc+=1
+                        #action_d = self.dqn_exploit(state,spd_seq)
+                        #np.random.seed(seed)
+                    current_lane = np.clip(round(one_thread_env.vehicle.position[1]/4), 0, 2)
+                    if current_lane>0 and action_d == 0:
+                        lc+=1
+                    elif current_lane<2 and action_d == 2:
+                        lc+=1
                 action_g, reward_no_solution, no_solution_done,delta_t,cert = self.get_MPC_actions(
                     one_thread_env,action_d, train=True, horizon=10, dt=0.4)
                 next_state, reward, done, truncate, info = one_thread_env.step(action_g)
                 reward += reward_no_solution
                 done = done or no_solution_done
                 step_reward = reward
+                #next_state = self.make_state0(one_thread_env,np.array(next_state))
                 next_state = self.make_state(one_thread_env,np.array(next_state))
                 state = next_state
                 if count % round(one_thread_env.config['policy_frequency']/self.policy_frequency) == 0 or done or truncate:
@@ -820,10 +860,13 @@ class SacdAgent(BaseAgent):
                     self.env.render()
                 if count % round(self.env.config['policy_frequency']/self.policy_frequency) == 0:
                     eco_seq = self.env.get_eco_seq()
+                    spd_seq = normalize_speed(self.env.get_speed_seq(100),self.upper,self.lower)
                     if self.method=='sacd' or self.method=='ac':
-                        action_d = self.exploit(state,eco_seq)
+                        #action_d = self.exploit(state,eco_seq)
+                        action_d = self.exploit(state,spd_seq)
                     elif self.method=='dqn':
-                        action_d = self.dqn_exploit(state,eco_seq)
+                        #action_d = self.dqn_exploit(state,eco_seq)
+                        action_d = self.dqn_exploit(state,spd_seq)
                 # if not process:
                 #     print(action_d)
                 # 保持不变

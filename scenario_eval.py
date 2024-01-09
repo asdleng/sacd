@@ -42,7 +42,7 @@ def write_excel_xlsx(path, sheet_name, value):
 
 MPC_protect = True
 behavior_flag = 1
-scenario_num = 1
+scenario_num = 6
 sur_spd = 10
 seed = 1
 spd_segs = []
@@ -52,7 +52,7 @@ DRL_times = []
 MPC_times = []
 s_t_segs = []
 s_t_segs_tracking = []
-vehicle_density = 1.0
+vehicle_density = 1.4
 upper = 20
 lower = 0
 # 3-stage or IDM ---- if use 'behavior_flag==4', then just ignore the M-IDM planned trajectory and always use the 3-stage one
@@ -125,9 +125,10 @@ sacdagent.RENDER = True
 #sacdagent.policy.load("/home/i/sacd/sacd/sacd_current_model/policy.pth")# 注意lower = 10
 #sacdagent.policy.load("/home/i/sacd/scenario_eval.pth") # 注意lower = 8
 #sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm2.pth") # 注意lower = 10
-#sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm4.pth") # 注意lower = 0
-#sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm5.pth") # 注意lower = 0
-sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm4.pth") # 注意lower = 0
+#sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm4.pth") # 注意lower = 0, 使用spd_seq
+#sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm5.pth") # 注意lower = 0, 使用eco_seq
+#sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm7.pth") # 注意lower = 0, 使用spd_seq
+sacdagent.policy.load("/home/i/sacd/scenario_eval_lstm8.pth") # 注意lower = 0, 使用eco_seq
 sacdagent.policy.eval()
 total_return = 0
 collision = 0
@@ -164,8 +165,9 @@ for i in range(len(spd_segs)):
     if (RENDER):
         env.config['offscreen_rendering'] = False
     seed+=1
-    state = state[0]
-    state = state.reshape([state_dim])
+    #state = state[0]
+    #state = state.reshape([state_dim])
+    state = sacdagent.make_state(env,state[0])
     episode_steps = 0
     episode_return = 0.0
     done, truncate = False, False
@@ -205,8 +207,10 @@ for i in range(len(spd_segs)):
         elif behavior_flag == 1 or behavior_flag == 3: # DRL+MPC
             if count % round(env.config['policy_frequency']/policy_frequency) == 0:
                 speed_seq = normalize_speed(env.get_speed_seq(100),upper,lower)
+                eco_seq = env.get_eco_seq()
                 t1 = time.time()
-                action_d = sacdagent.exploit(state,speed_seq)
+                #action_d = sacdagent.exploit(state,speed_seq)
+                action_d = sacdagent.exploit(state,eco_seq)
                 t2 = time.time()
                 DRL_times.append(t2-t1)
                 if action_d != 1:
@@ -243,7 +247,7 @@ for i in range(len(spd_segs)):
             action_g = None
 
         next_state, reward, done, truncate, info = env.step(action_g)
-        if last_current_lane!=current_lane:
+        if last_current_lane != current_lane:
             lane_change_num+=1
             last_current_lane = current_lane
         if count % round(env.config['policy_frequency']/policy_frequency) == 0:
@@ -252,7 +256,8 @@ for i in range(len(spd_segs)):
 
         if behavior_flag == 1:
             last_d = action_d
-            next_state = np.array(next_state).reshape([state_dim])
+            #next_state = np.array(next_state).reshape([state_dim])
+            next_state = sacdagent.make_state(env,np.array(next_state))
             state = next_state
         error = abs(info['speed']-env.get_ref_speed()[0])
         eposide_error += error

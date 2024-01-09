@@ -106,10 +106,12 @@ class LazyMemory(dict):
         states = np.empty(
             (batch_size, self.state_shape), dtype=float)
         speed_seq1s = np.empty(
+            #(batch_size, self.speed_seq_shape), dtype=float)
             (batch_size, self.speed_seq_shape[0],self.speed_seq_shape[1]), dtype=float)
         next_states = np.empty(
             (batch_size, self.state_shape), dtype=float)
         speed_seq2s = np.empty(
+            #(batch_size, self.speed_seq_shape), dtype=float)
             (batch_size, self.speed_seq_shape[0],self.speed_seq_shape[1]), dtype=float)
 
         for i, index in enumerate(indices):

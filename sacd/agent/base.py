@@ -43,7 +43,8 @@ class BaseAgent(ABC):
             self.memory = LazyMultiStepMemory(
                 capacity=memory_size,
                 state_shape=self.env.observation_space.shape[0]*self.env.observation_space.shape[1],
-                speed_seq_shape=[2,300],
+                #speed_seq_shape=100,    
+                speed_seq_shape=[2,300],    
                 device=self.device, gamma=gamma, multi_step=multi_step)
 
         self.log_dir = log_dir
