@@ -127,7 +127,7 @@ def smooth(data, sm=1):
             smooth_data.append(d)
     return smooth_data
 def reading(method,has_speed = True,speed_type='cnn'):
-    max_index = 499
+    max_index = 549
     root_path = f"/home/i/sacd/sacd/{method}_current_model/"
     if speed_type=='lstm':
         root_path = f"/home/i/sacd/sacd/{method}_lstm_current_model/"
@@ -200,9 +200,9 @@ def reading(method,has_speed = True,speed_type='cnn'):
     means = moving_ave(means)
     suc_rate = moving_ave(suc_rate)
     x_data = np.arange(len(means))*100
-    y_data = smooth(transposed_data, 10)
-    y_data_sc = smooth(transposed_data_sc, 10)
-    y_data_lc = smooth(transposed_data_lc, 10)
+    y_data = smooth(transposed_data, 5)
+    y_data_sc = smooth(transposed_data_sc, 5)
+    y_data_lc = smooth(transposed_data_lc, 5)
     return x_data,means,suc_rate,y_data,y_data_sc,y_data_lc
 
 def main():
@@ -234,7 +234,7 @@ def main():
     sns.tsplot(time=x_data_d, data=y_data_d, color=color[1], linestyle=linestyle[0])
     #sns.tsplot(time=x_data_ac, data=y_data_ac, color=color[2], linestyle=linestyle[0])
     sns.tsplot(time=x_data_ns, data=y_data_ns, color=color[2], linestyle=linestyle[0])
-    plt.xlim(0,50000)
+    plt.xlim(0,55000)
     plt.ylim(30,60) 
     plt.xlabel('Steps')
     plt.ylabel('Average Mean Return')
@@ -252,7 +252,7 @@ def main():
     sns.tsplot(time=x_data_d, data=y_data_d_sc, color=color[1], linestyle=linestyle[0])
     #sns.tsplot(time=x_data_ac, data=y_data_sc_ac, color=color[2], linestyle=linestyle[0])
     sns.tsplot(time=x_data_ns, data=y_data_ns_sc, color=color[2], linestyle=linestyle[0])
-    plt.xlim(0,50000)
+    plt.xlim(0,55000)
     plt.ylim(0.4,1.2)
     plt.xlabel('Steps')
     plt.ylabel('Success Rate')
@@ -270,7 +270,7 @@ def main():
     sns.tsplot(time=x_data_d, data=y_data_d_lc, color=color[1], linestyle=linestyle[0])
     #sns.tsplot(time=x_data_ac, data=y_data_sc_ac, color=color[2], linestyle=linestyle[0])
     sns.tsplot(time=x_data_ns, data=y_data_ns_lc, color=color[2], linestyle=linestyle[0])
-    plt.xlim(0,50000)
+    plt.xlim(0,55000)
     plt.ylim(0,8)
     plt.xlabel('Steps')
     plt.ylabel('Average Lane Change Numbers')

@@ -5,10 +5,14 @@ __pycache__/
 *.out
 sacd_model/
 sacd_lstm_model/
+sacd_lstm_model0104/
 sacd_no_spd_model/
+sacd_no_spd_model0104/
+sacd_no_spd_model0113/
 1006/
 dqn_model/
 dqn_lstm_model/
+dqn_lstm_model0104/
 images/
 scenario_eval_traj/
 *.pkl

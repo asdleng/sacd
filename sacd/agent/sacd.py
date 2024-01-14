@@ -24,7 +24,7 @@ class SacdAgent(BaseAgent):
                  update_interval=4, target_update_interval=1000,
                  use_per=False, dueling_net=False, num_eval_steps=1000,
                  max_episode_steps=1000, log_interval=100, log_interval_ep=1,eval_interval=10000,
-                 cuda=True, seed=0, has_speed=True, spd_type = 'lstm', method='dqn'):
+                 cuda=True, seed=0, has_speed=False, spd_type = 'cnn', method='sacd'):
         super().__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size, gamma,
             multi_step, target_entropy_ratio, start_steps, update_interval,
@@ -232,8 +232,8 @@ class SacdAgent(BaseAgent):
         self.online_critic.load(os.path.join(load_dir, 'online_critic.pth'))
         self.target_critic.load(os.path.join(load_dir, 'target_critic.pth'))        
         self.policy.load(os.path.join(load_dir, 'policy.pth'))
-        # if self.method=='sacd':
-        #     self.log_alpha.load(os.path.join(load_dir,'log_alpha.pth'))
+        if self.method=='sacd':
+            self.log_alpha = torch.load(os.path.join(load_dir,'log_alpha.pth'))
         with open(load_dir+"current_states.txt", "r") as file:
             self.episodes = int(file.readline().strip())
             self.steps = int(file.readline().strip())
@@ -244,8 +244,8 @@ class SacdAgent(BaseAgent):
         self.online_critic.save(os.path.join(save_dir, 'online_critic.pth'))
         self.target_critic.save(os.path.join(save_dir, 'target_critic.pth'))
         self.policy.save(os.path.join(save_dir, 'policy.pth'))
-        # if self.method=='sacd':
-        #     self.log_alpha.save(os.path.join(save_dir, 'log_alpha.pth'))
+        if self.method=='sacd':
+            torch.save(self.log_alpha,os.path.join(save_dir, 'log_alpha.pth'))
         with open(save_dir+"current_states.txt", "w") as file:
             file.write(str(self.episodes) + "\n")
             file.write(str(self.steps) + "\n")
