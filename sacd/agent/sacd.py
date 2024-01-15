@@ -24,7 +24,7 @@ class SacdAgent(BaseAgent):
                  update_interval=4, target_update_interval=1000,
                  use_per=False, dueling_net=False, num_eval_steps=1000,
                  max_episode_steps=1000, log_interval=100, log_interval_ep=1,eval_interval=10000,
-                 cuda=True, seed=0, has_speed=False, spd_type = 'cnn', method='sacd'):
+                 cuda=True, seed=0, has_speed=True, spd_type = 'lstm', method='dqn'):
         super().__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size, gamma,
             multi_step, target_entropy_ratio, start_steps, update_interval,
@@ -44,8 +44,8 @@ class SacdAgent(BaseAgent):
         self.epsilon = 1.0
         self.upper = 20
         self.lower = 0
-        self.continue_train = False
-        self.continue_eval = False
+        self.continue_train = True
+        self.continue_eval = True
         # 注意，这里是为了避免频繁换道
         self.policy_frequency = 1
         self.env.configure(
