@@ -41,8 +41,9 @@ def write_excel_xlsx(path, sheet_name, value):
 # LINE 75: speed_sequence = speed_sequence.view(speed_sequence.size(0), speed_sequence.size(1), 1)
 
 MPC_protect = True
+global_speed = True
 behavior_flag = 1
-scenario_num = 6
+scenario_num = 1
 sur_spd = 10
 seed = 1
 spd_segs = []
@@ -52,11 +53,11 @@ DRL_times = []
 MPC_times = []
 s_t_segs = []
 s_t_segs_tracking = []
-vehicle_density = 1.4
+vehicle_density = 1.0
 upper = 20
 lower = 0
 # 3-stage or IDM ---- if use 'behavior_flag==4', then just ignore the M-IDM planned trajectory and always use the 3-stage one
-if behavior_flag == 4:
+if global_speed  == False:
     spd_file = "/home/i/sacd/ref_spd_data/idm_scenario"+str(scenario_num)+"/spd_seg_lin.txt"
     target_t_file = "/home/i/sacd/ref_spd_data/idm_scenario"+str(scenario_num)+"/target_times.txt"
 else:
@@ -339,6 +340,10 @@ sub_col = int(np.sqrt(len(spd_segs))+1)
 fig, axes = plt.subplots(sub_row,sub_col)
 fig2, axes2 = plt.subplots(sub_row,sub_col)
 k = 0
+
+if global_speed == False:
+    behavior_flag = 4
+
 for i in range(sub_row):
     if(k>=len(spd_segs)):
         break

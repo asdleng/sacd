@@ -5,6 +5,7 @@ __pycache__/
 *.out
 sacd_model/
 sacd_lstm_model/
+sacd_lstm_modelnocos/
 sacd_lstm_model0104/
 sacd_no_spd_model/
 sacd_no_spd_model0104/

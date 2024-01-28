@@ -57,6 +57,7 @@ def true_segment_length(my_list):
     max_segment_length = max(max_segment_length, current_segment_length)
 
     return max_segment_length
+
 def gen_spd_segs(dis_file,intersection_file,spd_file,save_file):
     dis = np.genfromtxt(dis_file, delimiter=',')
     intersection = np.genfromtxt(intersection_file, delimiter=',')
@@ -67,13 +68,13 @@ def gen_spd_segs(dis_file,intersection_file,spd_file,save_file):
     print(energy)
 
     plt.plot(dis,spd,color='green')
-    inter_dis = 50
+    inter_dis = 00
     spd_segs = []
     dis_segs = []
     last_inter = -inter_dis*2
     target_times = []
     for inter in intersection:
-        index = np.array((dis<inter-inter_dis)*(dis>last_inter+inter_dis))
+        index = np.array((dis<=inter-inter_dis)*(dis>=last_inter+inter_dis))
         target_t = true_segment_length(index)
         target_times.append(target_t)
         spd_segs.append(spd[index])
